@@ -1,106 +1,63 @@
 import { useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { apiLogin } from '../lib/auth';
+import { useNavigate, Link } from 'react-router-dom';
 import './Auth.css';
 
-function Login() {
-  const navigate = useNavigate();
-  const location = useLocation();
-
-  const justRegistered = location.state?.justRegistered || false;
-  const prefillEmail = location.state?.email || '';
-
-  const [email, setEmail] = useState(prefillEmail);
+export default function Login() {
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
-  const validate = () => {
-    if (!email.trim() || !password) return 'Please fill in all fields';
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-      return 'Please enter a valid email address';
-    if (password.length < 6) return 'Password must be at least 6 characters';
-    return '';
-  };
-
-  const handleSubmit = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-
-    const validationError = validate();
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-
     setError('');
-    setLoading(true);
 
     try {
-      await apiLogin({ email: email.trim().toLowerCase(), password });
-      navigate('/dashboard', { replace: true });
+      // Sending data to our Django API
+      const response = await fetch('http://localhost:8000/api/login/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        // Save token and role to browser storage
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('role', data.role);
+        localStorage.setItem('userId', data.user_id);
+        
+        // Redirect to dashboard
+        navigate('/dashboard');
+      } else {
+        setError(data.error || 'Login failed. Check your credentials.');
+      }
     } catch (err) {
-      setError(err.message || 'Login failed');
-    } finally {
-      setLoading(false);
+      setError('Server error. Is Django running?');
     }
   };
 
   return (
     <div className="auth-container">
-      <div className="auth-card">
-        <h2>Welcome Back</h2>
-        <p className="subtitle">Please sign in to continue</p>
-
-        {justRegistered && !error && (
-          <p className="success-message">
-            Account created successfully. Please sign in to continue.
-          </p>
-        )}
-
-        <form onSubmit={handleSubmit} noValidate>
-          <div className="form-group">
-            <label htmlFor="email">Email</label>
-            <input
-              type="email"
-              id="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-              disabled={loading}
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="password">Password</label>
-            <input
-              type="password"
-              id="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
-              autoComplete="current-password"
-              disabled={loading}
-            />
-          </div>
-
-          {error && (
-            <p className="error-message" role="alert">
-              {error}
-            </p>
-          )}
-
-          <button type="submit" className="btn-primary" disabled={loading}>
-            {loading ? 'Signing in…' : 'Sign In'}
-          </button>
-        </form>
-
-        <p className="footer-text">
-          Don't have an account? <Link to="/signup">Sign up</Link>
-        </p>
-      </div>
+      <h2>Sign In</h2>
+      {error && <p className="error-msg">{error}</p>}
+      
+      <form onSubmit={handleLogin}>
+        <div className="form-group">
+          <label>Username</label>
+          <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} required />
+        </div>
+        <div className="form-group">
+          <label>Password</label>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        </div>
+        <button type="submit" className="btn-submit">Login</button>
+      </form>
+      
+      <p style={{textAlign: 'center', marginTop: '15px', fontSize: '14px'}}>
+        Don't have an account? <Link to="/signup" style={{color: '#4CAF50'}}>Sign up here</Link>
+      </p>
     </div>
   );
 }
-
-export default Login;

@@ -1,39 +1,27 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Welcome from './components/Welcome';
 import Login from './components/Login';
 import Signup from './components/Signup';
-import Dashboard from './components/Dashboard';
-import Profile from './components/Profile';
-import Jobs from './components/Jobs';
-import Saved from './components/Saved';
-import PublicOnly from './lib/PublicOnly';
+// We will create these placeholders next
+import Dashboard from './components/Dashboard'; 
+import Settings from './components/Settings';
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* When the URL is just "/", show the Welcome page */}
         <Route path="/" element={<Welcome />} />
-        <Route
-          path="/login"
-          element={
-            <PublicOnly>
-              <Login />
-            </PublicOnly>
-          }
-        />
-        <Route
-          path="/signup"
-          element={
-            <PublicOnly>
-              <Signup />
-            </PublicOnly>
-          }
-        />
+        
+        {/* When the URL is "/login", show the Login page */}
+        <Route path="/login" element={<Login />} />
+        
+        {/* When the URL is "/signup", show the Signup page */}
+        <Route path="/signup" element={<Signup />} />
+        
+        {/* The Dashboard and Settings (we will build these out in Phase 3 & 4) */}
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/profile" element={<Profile />} />
-        <Route path="/jobs" element={<Jobs />} />
-        <Route path="/saved" element={<Saved />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="/settings" element={<Settings />} />
       </Routes>
     </BrowserRouter>
   );

@@ -1,90 +1,66 @@
 import { Link } from 'react-router-dom';
 import './Welcome.css';
 
-function Welcome() {
+export default function Welcome() {
   return (
-    <div className="welcome-container">
-      <header className="welcome-nav">
-        <Link to="/" className="brand">
-          My<span>Jobs</span>
-        </Link>
-        <nav>
-          <Link to="/login" className="nav-link">
-            Sign In
-          </Link>
-          <Link to="/signup" className="nav-cta">
-            Get Started
-          </Link>
-        </nav>
+    <div className="welcome-page">
+      {/* 1. HERO SECTION */}
+      <header className="hero">
+        <div className="hero-content">
+          <h1 className="logo-text">My_Jobs</h1>
+          <h2>Bridging the Gap in Malawi's Labour Market</h2>
+          <p>
+            Our vision is to eliminate bias, reduce hiring time, and connect capable 
+            Malawian professionals with the right opportunities using advanced AI 
+            semantic matching and document processing.
+          </p>
+          <div className="hero-buttons">
+            <Link to="/signup" className="btn-primary">Get Started</Link>
+            <Link to="/login" className="btn-secondary">Sign In</Link>
+          </div>
+        </div>
       </header>
 
-      <main className="welcome-hero">
-        <div className="hero-text">
-          <span className="badge"> Get Your First Job </span>
-          <h1>
-            Find the job that <br />
-            <span className="gradient-text">fits your life</span>
-          </h1>
-          <p className="hero-subtitle">
-            Discover thousands of opportunities, connect with top companies,
-            and take the next step in your career — all in one place. CLICK BELOW TO START
-          </p>
-
-          <div className="hero-actions">
-            <Link to="/signup" className="btn btn-primary">
-              Create Free Account
-            </Link>
-            <Link to="/login" className="btn btn-secondary">
-              I already have an account
-            </Link>
+      {/* 2. JOB CATEGORIES */}
+      <section className="features">
+        <h2>Jobs You Can Access</h2>
+        <p className="subtitle">Powered by our AI matching engine</p>
+        <div className="feature-grid">
+          <div className="feature-card">
+            <h3>💻 Technology & IT</h3>
+            <p>Software Engineers, Data Analysts, Network Admins, and more.</p>
           </div>
-
-          <div className="hero-stats">
-            <div>
-              <strong>comming soon</strong>
-              <span>Jobs listed</span>
-            </div>
-            <div>
-              <strong>comming soon</strong>
-              <span>Companies</span>
-            </div>
-            <div>
-              <strong>coming soon</strong>
-              <span>Job seekers</span>
-            </div>
+          <div className="feature-card">
+            <h3>🏥 Healthcare</h3>
+            <p>Nurses, Doctors, Lab Technicians, and Hospital Administrators.</p>
+          </div>
+          <div className="feature-card">
+            <h3>📈 Business & Finance</h3>
+            <p>Accountants, HR Managers, Sales Executives, and Marketers.</p>
+          </div>
+          <div className="feature-card">
+            <h3>🏗️ Engineering</h3>
+            <p>Civil Engineers, Architects, and Project Managers.</p>
           </div>
         </div>
+      </section>
 
-        <div className="hero-art" aria-hidden="true">
-          <div className="card-float card-1">
-            <span className="dot" />
-            <div>
-              <strong>Online Jobs</strong>
-              <small>Remote · Full-time</small>
-            </div>
-          </div>
-          <div className="card-float card-2">
-            <span className="dot dot-green" />
-            <div>
-              <strong>MW2026</strong>
-              <small>Vision · 2026</small>
-            </div>
-          </div>
-          <div className="card-float card-3">
-            <span className="dot dot-orange" />
-            <div>
-              <strong>NGO's</strong>
-              <small>On-site · Full-time</small>
-            </div>
-          </div>
-        </div>
-      </main>
+      {/* 3. ABOUT THE CREATORS */}
+      <section className="about">
+        <h2>About the Project</h2>
+        <p>
+          This system was developed to address the challenges of manual resume screening and 
+          candidate shortlisting. By utilizing React, Django, TF-IDF, and the Google Gemini API, 
+          we provide a seamless, intelligent hiring experience.
+        </p>
+        <p style={{marginTop: '10px', fontWeight: 'bold', color: '#4CAF50'}}>
+          Developed as a Mini Project.
+        </p>
+      </section>
 
-      <footer className="welcome-footer">
-        <p>© {new Date().getFullYear()} My Jobs. All rights reserved.</p>
+      <footer>
+        <p>&copy; 2024 My_Jobs. All rights reserved.</p>
       </footer>
     </div>
   );
 }
-
-export default Welcome;

@@ -1,139 +1,120 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { apiRegister } from '../lib/auth';
+import { useNavigate, Link } from 'react-router-dom';
 import './Auth.css';
 
-function Signup() {
-  const navigate = useNavigate();
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirm, setConfirm] = useState('');
+export default function Signup() {
+  const [formData, setFormData] = useState({
+    username: '', first_name: '', middle_name: '', last_name: '',
+    date_of_birth: '', email: '', phone_number: '', role: 'APPLICANT',
+    password: '', confirm_password: ''
+  });
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
-  const validate = () => {
-    if (!name.trim()) return 'Please enter your name';
-    if (!email.trim() || !password || !confirm)
-      return 'Please fill in all fields';
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-      return 'Please enter a valid email address';
-    if (password.length < 8)
-      return 'Password must be at least 8 characters';
-    if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password))
-      return 'Password must contain letters and numbers';
-    if (password !== confirm) return 'Passwords do not match';
-    return '';
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = async (e) => {
+  const handleSignup = async (e) => {
     e.preventDefault();
+    setError('');
 
-    const validationError = validate();
-    if (validationError) {
-      setError(validationError);
-      return;
+    if (formData.password !== formData.confirm_password) {
+      return setError('Passwords do not match!');
     }
 
-    setError('');
-    setLoading(true);
+    // Remove confirm_password before sending to backend
+    const { confirm_password, ...dataToSend } = formData;
 
     try {
-      const normalizedEmail = email.trim().toLowerCase();
-      await apiRegister({
-        name: name.trim(),
-        email: normalizedEmail,
-        password,
+      const response = await fetch('http://localhost:8000/api/register/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dataToSend),
       });
 
-      navigate('/login', {
-        replace: true,
-        state: { justRegistered: true, email: normalizedEmail },
-      });
+      const data = await response.json();
+
+      if (response.ok) {
+        // As per your document: Don't go to dashboard, go to sign in page
+        alert('Account created successfully! Please sign in.');
+        navigate('/login');
+      } else {
+        // Django will send back errors (e.g., "username already exists")
+        setError(JSON.stringify(data));
+      }
     } catch (err) {
-      setError(err.message || 'Signup failed');
-    } finally {
-      setLoading(false);
+      setError('Server error. Is Django running?');
     }
   };
 
   return (
-    <div className="auth-container">
-      <div className="auth-card">
-        <h2>Create Account</h2>
-        <p className="subtitle">Sign up to get started</p>
-
-        <form onSubmit={handleSubmit} noValidate>
-          <div className="form-group">
-            <label htmlFor="name">Full Name</label>
-            <input
-              type="text"
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Jane Doe"
-              autoComplete="name"
-              disabled={loading}
-            />
+    <div className="auth-container" style={{maxWidth: '500px'}}>
+      <h2>Create an Account</h2>
+      {error && <p className="error-msg">{error}</p>}
+      
+      <form onSubmit={handleSignup}>
+        <div style={{display: 'flex', gap: '10px'}}>
+          <div className="form-group" style={{flex: 1}}>
+            <label>First Name</label>
+            <input type="text" name="first_name" onChange={handleChange} required />
           </div>
-
-          <div className="form-group">
-            <label htmlFor="email">Email</label>
-            <input
-              type="email"
-              id="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-              disabled={loading}
-            />
+          <div className="form-group" style={{flex: 1}}>
+            <label>Middle Name</label>
+            <input type="text" name="middle_name" onChange={handleChange} />
           </div>
+        </div>
 
-          <div className="form-group">
-            <label htmlFor="password">Password</label>
-            <input
-              type="password"
-              id="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="At least 8 characters"
-              autoComplete="new-password"
-              disabled={loading}
-            />
-            <p className="field-hint">Must contain letters and numbers</p>
+        <div className="form-group">
+          <label>Last Name</label>
+          <input type="text" name="last_name" onChange={handleChange} required />
+        </div>
+
+        <div className="form-group">
+          <label>Username</label>
+          <input type="text" name="username" onChange={handleChange} required />
+        </div>
+
+        <div className="form-group">
+          <label>Email</label>
+          <input type="email" name="email" onChange={handleChange} required />
+        </div>
+
+        <div style={{display: 'flex', gap: '10px'}}>
+          <div className="form-group" style={{flex: 1}}>
+            <label>Date of Birth</label>
+            <input type="date" name="date_of_birth" onChange={handleChange} required />
           </div>
-
-          <div className="form-group">
-            <label htmlFor="confirm">Confirm Password</label>
-            <input
-              type="password"
-              id="confirm"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              placeholder="Re-enter your password"
-              autoComplete="new-password"
-              disabled={loading}
-            />
+          <div className="form-group" style={{flex: 1}}>
+            <label>Phone Number</label>
+            <input type="text" name="phone_number" onChange={handleChange} required />
           </div>
+        </div>
 
-          {error && (
-            <p className="error-message" role="alert">
-              {error}
-            </p>
-          )}
+        <div className="form-group">
+          <label>I am a...</label>
+          <select name="role" onChange={handleChange} value={formData.role}>
+            <option value="APPLICANT">Applicant (Looking for a job)</option>
+            <option value="RECRUITER">Recruiter (Posting jobs)</option>
+          </select>
+        </div>
 
-          <button type="submit" className="btn-primary" disabled={loading}>
-            {loading ? 'Creating account…' : 'Sign Up'}
-          </button>
-        </form>
+        <div className="form-group">
+          <label>Password</label>
+          <input type="password" name="password" onChange={handleChange} required />
+        </div>
 
-        <p className="footer-text">
-          Already have an account? <Link to="/login">Sign in</Link>
-        </p>
-      </div>
+        <div className="form-group">
+          <label>Confirm Password</label>
+          <input type="password" name="confirm_password" onChange={handleChange} required />
+        </div>
+
+        <button type="submit" className="btn-submit">Sign Up</button>
+      </form>
+      
+      <p style={{textAlign: 'center', marginTop: '15px', fontSize: '14px'}}>
+        Already have an account? <Link to="/login" style={{color: '#4CAF50'}}>Sign in</Link>
+      </p>
     </div>
   );
 }
-
-export default Signup;
