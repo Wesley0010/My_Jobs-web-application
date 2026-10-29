@@ -1,37 +1,38 @@
-from django.shortcuts import render
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from .models import Resume, Job
-from .utils import extract_text_from_file
-# Create your views here.
-from rest_framework import status
-from rest_framework.response import Response
-from rest_framework.decorators import api_view
-from rest_framework.authtoken.models import Token
-from django.contrib.auth import authenticate
-from .serializers import UserRegistrationSerializer
 import os
 import google.generativeai as genai
 from dotenv import load_dotenv
-from .models import Resume, Job, MatchResult, Application
-from django.utils.dateparse import parse_datetime
 from django.http import HttpResponse
+from django.utils.dateparse import parse_datetime
+from django.core.mail import send_mail
+from django.contrib.auth import authenticate
+
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
-from django.core.mail import send_mail
 
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.authtoken.models import Token
 
-load_dotenv() # Loads the .env file
+from .models import User, Resume, Job, MatchResult, Application
+from .serializers import UserRegistrationSerializer
+from .utils import extract_text_from_file, calculate_match_score
+from .models import User, Resume, Job, MatchResult, Application, Complaint
+
+# Load Gemini API Key
+load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-# 1. SIGNUP API
+# ==========================================
+# 1. AUTHENTICATION
+# ==========================================
 @api_view(['POST'])
 def register_user(request):
     if request.method == 'POST':
         serializer = UserRegistrationSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
-            # Create a token for the user right after they register
             token, created = Token.objects.get_or_create(user=user)
             return Response({
                 "message": "User registered successfully",
@@ -41,14 +42,11 @@ def register_user(request):
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# 2. LOGIN API
 @api_view(['POST'])
 def login_user(request):
     if request.method == 'POST':
         username = request.data.get('username')
         password = request.data.get('password')
-        
-        # authenticate() checks the database for the correct username/password
         user = authenticate(username=username, password=password)
         
         if user is not None:
@@ -57,43 +55,40 @@ def login_user(request):
                 "message": "Login successful",
                 "token": token.key,
                 "user_id": user.id,
-                "role": user.role
+                "role": user.role,
+                "first_name": user.first_name,  # <--- ADDED THIS
+                "last_name": user.last_name     # <---
             }, status=status.HTTP_200_OK)
         else:
             return Response({"error": "Invalid Credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
-        # --- APPLICANT: UPLOAD RESUME ---
+# ==========================================
+# 2. UPLOADS & JOBS
+# ==========================================
 @api_view(['POST'])
-@permission_classes([IsAuthenticated]) # Only logged-in users can upload
+@permission_classes([IsAuthenticated])
 def upload_resume(request):
     try:
-        # Get the file from the request
         file = request.FILES.get('file')
         if not file:
             return Response({"error": "No file uploaded"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 1. Save the file to the Resume model
-        # update_or_create ensures if they upload again, it replaces the old one
         resume, created = Resume.objects.update_or_create(
             applicant=request.user,
             defaults={'file': file}
         )
 
-        # 2. Extract text from the saved file
         extracted_text = extract_text_from_file(resume.file.path)
         resume.parsed_text = extracted_text
         resume.save()
 
         return Response({
             "message": "Resume uploaded and parsed successfully!",
-            "text_preview": extracted_text[:200] # Send back first 200 chars for proof
+            "text_preview": extracted_text[:200]
         }, status=status.HTTP_200_OK)
-
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
-# --- RECRUITER: CREATE JOB ---
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_job(request):
@@ -102,7 +97,7 @@ def create_job(request):
 
     title = request.data.get('title')
     description = request.data.get('description')
-    file = request.FILES.get('file') # Vacancy file (optional)
+    file = request.FILES.get('file')
 
     if not title or not description:
         return Response({"error": "Title and description are required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -114,7 +109,6 @@ def create_job(request):
         file=file
     )
 
-    # If they uploaded a vacancy document, parse it and append to description
     if file:
         extracted_text = extract_text_from_file(job.file.path)
         job.description += f"\n\n--- Extracted from Document ---\n{extracted_text}"
@@ -122,28 +116,90 @@ def create_job(request):
 
     return Response({"message": "Job posted successfully!", "job_id": job.id}, status=status.HTTP_201_CREATED)
 
-# --- RECRUITER: GET THEIR OWN POSTED JOBS ---
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_recruiter_jobs(request):
     if request.user.role != 'RECRUITER':
         return Response({"error": "Only recruiters can access this"}, status=status.HTTP_403_FORBIDDEN)
-
-    # Fetch jobs where the recruiter is the currently logged-in user
-    jobs = Job.objects.filter(recruiter=request.user).order_by('-posted_at')
     
-    job_list = []
-    for job in jobs:
-        job_list.append({
-            "id": job.id,
-            "title": job.title,
-            "description": job.description,
-            "posted_at": job.posted_at
-        })
-        
+    jobs = Job.objects.filter(recruiter=request.user).order_by('-posted_at')
+    job_list = [{"id": j.id, "title": j.title, "description": j.description, "posted_at": j.posted_at} for j in jobs]
     return Response(job_list, status=status.HTTP_200_OK)
 
-# --- GET USER PROFILE ---
+# ==========================================
+# 3. AI MATCHING
+# ==========================================
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_matched_jobs(request):
+    if request.user.role != 'APPLICANT':
+        return Response({"error": "Only applicants can access this"}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        resume = Resume.objects.get(applicant=request.user)
+        if not resume.parsed_text:
+            return Response({"error": "Resume text is empty. Please upload a valid document."}, status=status.HTTP_400_BAD_REQUEST)
+    except Resume.DoesNotExist:
+        return Response({"error": "Please upload a resume first"}, status=status.HTTP_400_BAD_REQUEST)
+
+    jobs = Job.objects.all()
+    matched_jobs = []
+
+    for job in jobs:
+        job_text = f"{job.title} {job.description}"
+        score = calculate_match_score(resume.parsed_text, job_text)
+
+        if score > 10.0:
+            MatchResult.objects.update_or_create(
+                job=job, applicant=request.user,
+                defaults={'score': score}
+            )
+            matched_jobs.append({
+                "job_id": job.id,
+                "title": job.title,
+                "description": job.description,
+                "recruiter": job.recruiter.username,
+                "score": score
+            })
+
+    matched_jobs = sorted(matched_jobs, key=lambda x: x['score'], reverse=True)
+    return Response(matched_jobs, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_applicants_for_job(request, job_id):
+    if request.user.role != 'RECRUITER':
+        return Response({"error": "Only recruiters can access this"}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        job = Job.objects.get(id=job_id, recruiter=request.user)
+    except Job.DoesNotExist:
+        return Response({"error": "Job not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    job_text = f"{job.title} {job.description}"
+    resumes = Resume.objects.exclude(parsed_text__isnull=True).exclude(parsed_text="")
+    matched_applicants = []
+
+    for resume in resumes:
+        score = calculate_match_score(resume.parsed_text, job_text)
+        if score > 10.0:
+            MatchResult.objects.update_or_create(
+                job=job, applicant=resume.applicant,
+                defaults={'score': score}
+            )
+            matched_applicants.append({
+                "applicant_id": resume.applicant.id,
+                "name": f"{resume.applicant.first_name} {resume.applicant.last_name}",
+                "email": resume.applicant.email,
+                "score": score
+            })
+
+    matched_applicants = sorted(matched_applicants, key=lambda x: x['score'], reverse=True)
+    return Response(matched_applicants, status=status.HTTP_200_OK)
+
+# ==========================================
+# 4. PROFILE & SETTINGS
+# ==========================================
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_profile(request):
@@ -159,35 +215,36 @@ def get_profile(request):
         "role": user.role
     }, status=status.HTTP_200_OK)
 
-# --- UPDATE USER PROFILE ---
 @api_view(['PUT'])
 @permission_classes([IsAuthenticated])
 def update_profile(request):
     user = request.user
     data = request.data
 
-    # Update the fields. If a field is missing in the request, keep the old one.
     user.first_name = data.get('first_name', user.first_name)
     user.middle_name = data.get('middle_name', user.middle_name)
     user.last_name = data.get('last_name', user.last_name)
     user.email = data.get('email', user.email)
     user.phone_number = data.get('phone_number', user.phone_number)
     
-    # Only update DOB if provided
-    if 'date_of_birth' in data and data['date_of_birth']:
-        user.date_of_birth = data['date_of_birth']
+    if 'date_of_birth' in data:
+        user.date_of_birth = data['date_of_birth'] if data['date_of_birth'] else None
 
-    # Check if they are trying to change their username (must ensure it doesn't already exist)
     new_username = data.get('username')
     if new_username and new_username != user.username:
         if User.objects.filter(username=new_username).exists():
             return Response({"error": "Username already taken"}, status=status.HTTP_400_BAD_REQUEST)
         user.username = new_username
 
-    user.save()
-    return Response({"message": "Profile updated successfully!"}, status=status.HTTP_200_OK)
+    try:
+        user.save()
+        return Response({"message": "Profile updated successfully!"}, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-# --- AI CHATBOT ---
+# ==========================================
+# 5. CHATBOT
+# ==========================================
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def chat_with_ai(request):
@@ -196,71 +253,57 @@ def chat_with_ai(request):
         return Response({"error": "Message is required"}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        # Initialize the Gemini model
         model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        # We give the AI context based on the user's role
         prompt = f"You are a helpful career assistant for a job matching website called My_Jobs. The user is a {request.user.role}. Answer this: {user_message}"
-        
         response = model.generate_content(prompt)
-        
         return Response({"reply": response.text}, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-# --- APPLICANT: APPLY FOR A JOB ---
+# ==========================================
+# 6. APPLICATIONS & INTERVIEWS
+# ==========================================
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def apply_for_job(request, job_id):
     if request.user.role != 'APPLICANT':
         return Response({"error": "Only applicants can apply"}, status=status.HTTP_403_FORBIDDEN)
-
     try:
         job = Job.objects.get(id=job_id)
     except Job.DoesNotExist:
         return Response({"error": "Job not found"}, status=status.HTTP_404_NOT_FOUND)
 
-    # Check if already applied
     if Application.objects.filter(job=job, applicant=request.user).exists():
         return Response({"error": "You have already applied for this job"}, status=status.HTTP_400_BAD_REQUEST)
 
     Application.objects.create(job=job, applicant=request.user)
     return Response({"message": "Application submitted successfully!"}, status=status.HTTP_201_CREATED)
 
-
-# --- RECRUITER: GET ALL APPLICATIONS FOR THEIR JOB ---
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_job_applications(request, job_id):
     if request.user.role != 'RECRUITER':
         return Response({"error": "Only recruiters can view applications"}, status=status.HTTP_403_FORBIDDEN)
-
     try:
         job = Job.objects.get(id=job_id, recruiter=request.user)
     except Job.DoesNotExist:
         return Response({"error": "Job not found or unauthorized"}, status=status.HTTP_404_NOT_FOUND)
 
     applications = Application.objects.filter(job=job).order_by('-applied_at')
-    
-    data = []
-    for app in applications:
-        data.append({
-            "application_id": app.id,
-            "applicant_name": f"{app.applicant.first_name} {app.applicant.last_name}",
-            "email": app.applicant.email,
-            "status": app.status,
-            "interview_date": app.interview_date
-        })
+    data = [{
+        "application_id": app.id,
+        "applicant_name": f"{app.applicant.first_name} {app.applicant.last_name}",
+        "email": app.applicant.email,
+        "status": app.status,
+        "interview_date": app.interview_date
+    } for app in applications]
     return Response(data, status=status.HTTP_200_OK)
 
-
-# --- RECRUITER: SCHEDULE INTERVIEW ---
 @api_view(['PUT'])
 @permission_classes([IsAuthenticated])
 def schedule_interview(request, application_id):
     if request.user.role != 'RECRUITER':
         return Response({"error": "Only recruiters can schedule interviews"}, status=status.HTTP_403_FORBIDDEN)
-
     try:
         application = Application.objects.get(id=application_id, job__recruiter=request.user)
     except Application.DoesNotExist:
@@ -274,45 +317,65 @@ def schedule_interview(request, application_id):
     application.status = 'INTERVIEW_SCHEDULED'
     application.save()
 
-    # --- SEND EMAIL NOTIFICATION ---
     subject = f"Interview Invitation: {application.job.title}"
-    message = f"Dear {application.applicant.first_name},\n\nYou have been invited for an interview for the position of {application.job.title}.\n\nDate & Time: {application.interview_date}\n\nBest regards,\n{request.user.first_name} {request.user.last_name}"
-    
-    send_mail(
-        subject,
-        message,
-        'noreply@myjobs.com', # From email
-        [application.applicant.email], # To email
-        fail_silently=False,
-    )
+    message = f"Dear {application.applicant.first_name},\n\nYou have been invited for an interview for {application.job.title}.\n\nDate & Time: {application.interview_date}\n\nBest regards,\n{request.user.first_name}"
+    send_mail(subject, message, 'noreply@myjobs.com', [application.applicant.email], fail_silently=False)
 
     return Response({"message": "Interview scheduled and email sent!"}, status=status.HTTP_200_OK)
-# --- ADMIN: GET ALL USERS AND JOBS ---
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def download_report(request, job_id):
+    if request.user.role != 'RECRUITER':
+        return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        job = Job.objects.get(id=job_id, recruiter=request.user)
+    except Job.DoesNotExist:
+        return Response({"error": "Job not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    applications = Application.objects.filter(job=job)
+    response = HttpResponse(content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="Report_{job.title}.pdf"'
+
+    p = canvas.Canvas(response, pagesize=letter)
+    p.setFont("Helvetica-Bold", 16)
+    p.drawString(100, 750, f"Applicant Report: {job.title}")
+    
+    p.setFont("Helvetica", 12)
+    y = 700
+    if not applications:
+        p.drawString(100, y, "No applications received yet.")
+    else:
+        for app in applications:
+            p.drawString(100, y, f"Name: {app.applicant.first_name} {app.applicant.last_name}")
+            p.drawString(100, y - 15, f"Email: {app.applicant.email}")
+            p.drawString(100, y - 30, f"Status: {app.status}")
+            y -= 60
+            if y < 50:
+                p.showPage()
+                y = 750
+
+    p.showPage()
+    p.save()
+    return response
+
+# ==========================================
+# 7. ADMIN
+# ==========================================
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_admin_data(request):
     if request.user.role != 'ADMIN':
         return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
-
-    # Fetch all users (excluding passwords for security)
     users = User.objects.all().values('id', 'username', 'email', 'first_name', 'last_name', 'role')
-    
-    # Fetch all jobs
     jobs = Job.objects.all().values('id', 'title', 'description', 'recruiter__username')
+    return Response({"users": list(users), "jobs": list(jobs)}, status=status.HTTP_200_OK)
 
-    return Response({
-        "users": list(users),
-        "jobs": list(jobs)
-    }, status=status.HTTP_200_OK)
-
-
-# --- ADMIN: UPDATE USER ROLE ---
 @api_view(['PUT'])
 @permission_classes([IsAuthenticated])
 def update_user_role(request, user_id):
     if request.user.role != 'ADMIN':
         return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
-
     try:
         user_to_update = User.objects.get(id=user_id)
     except User.DoesNotExist:
@@ -324,5 +387,138 @@ def update_user_role(request, user_id):
 
     user_to_update.role = new_role
     user_to_update.save()
-
     return Response({"message": f"User {user_to_update.username} updated to {new_role}"}, status=status.HTTP_200_OK)
+
+# --- BROWSE ALL JOBS (APPLICANT) ---
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def browse_all_jobs(request):
+    if request.user.role != 'APPLICANT':
+        return Response({"error": "Only applicants can browse jobs"}, status=status.HTTP_403_FORBIDDEN)
+    jobs = Job.objects.all().order_by('-posted_at')
+    data = [{
+        "id": job.id, "title": job.title, "description": job.description, 
+        "recruiter": job.recruiter.username, "posted_at": job.posted_at
+    } for job in jobs]
+    return Response(data, status=status.HTTP_200_OK)
+
+# --- GET MY APPLICATIONS (APPLICANT LOGS) ---
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_my_applications(request):
+    if request.user.role != 'APPLICANT':
+        return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
+    apps = Application.objects.filter(applicant=request.user).order_by('-applied_at')
+    data = [{
+        "application_id": app.id, "job_title": app.job.title, "status": app.status,
+        "interview_date": app.interview_date, "applied_at": app.applied_at
+    } for app in apps]
+    return Response(data, status=status.HTTP_200_OK)
+
+# --- COMPLAINTS / REPORTS ---
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_complaint(request):
+    message = request.data.get('message')
+    if not message:
+        return Response({"error": "Message is required"}, status=status.HTTP_400_BAD_REQUEST)
+    Complaint.objects.create(user=request.user, message=message)
+    return Response({"message": "Complaint submitted to Admin"}, status=status.HTTP_201_CREATED)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_my_complaints(request):
+    complaints = Complaint.objects.filter(user=request.user).order_by('-created_at')
+    data = [{"id": c.id, "message": c.message, "reply": c.admin_reply, "status": c.status, "date": c.created_at} for c in complaints]
+    return Response(data, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_all_complaints(request):
+    if request.user.role != 'ADMIN':
+        return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
+    complaints = Complaint.objects.all().order_by('-created_at')
+    data = [{"id": c.id, "user": c.user.username, "role": c.user.role, "message": c.message, "reply": c.admin_reply, "status": c.status, "date": c.created_at} for c in complaints]
+    return Response(data, status=status.HTTP_200_OK)
+
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def reply_complaint(request, complaint_id):
+    if request.user.role != 'ADMIN':
+        return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        complaint = Complaint.objects.get(id=complaint_id)
+    except Complaint.DoesNotExist:
+        return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+    
+    reply = request.data.get('reply')
+    if not reply:
+        return Response({"error": "Reply required"}, status=status.HTTP_400_BAD_REQUEST)
+    
+    complaint.admin_reply = reply
+    complaint.status = 'RESOLVED'
+    complaint.save()
+    return Response({"message": "Reply sent"}, status=status.HTTP_200_OK)
+
+# --- INTERVIEW LETTER GENERATION (APPLICANT) ---
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def generate_interview_letter(request, application_id):
+    if request.user.role != 'APPLICANT':
+        return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        app = Application.objects.get(id=application_id, applicant=request.user)
+        if app.status != 'INTERVIEW_SCHEDULED':
+            return Response({"error": "Interview not scheduled yet"}, status=status.HTTP_400_BAD_REQUEST)
+    except Application.DoesNotExist:
+        return Response({"error": "Application not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    response = HttpResponse(content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="Interview_Letter_{app.job.title}.pdf"'
+
+    p = canvas.Canvas(response, pagesize=letter)
+    p.setFont("Helvetica-Bold", 20)
+    p.drawString(150, 750, "MY_JOBS INTERVIEW INVITATION")
+    
+    p.setFont("Helvetica", 12)
+    p.drawString(100, 680, f"Date: {app.interview_date.strftime('%Y-%m-%d %H:%M')}")
+    p.drawString(100, 650, f"Dear {app.applicant.first_name} {app.applicant.last_name},")
+    p.drawString(100, 620, f"We are pleased to invite you for an interview for the position of:")
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(100, 600, f"{app.job.title}")
+    
+    p.setFont("Helvetica", 12)
+    p.drawString(100, 550, f"Recruiter: {app.job.recruiter.first_name} {app.job.recruiter.last_name}")
+    p.drawString(100, 520, "Please ensure you arrive 10 minutes before your scheduled time.")
+    p.drawString(100, 480, "We look forward to meeting you!")
+    
+    p.showPage()
+    p.save()
+    return response
+
+# --- RECRUITER LOGS ---
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_recruiter_logs(request):
+    if request.user.role != 'RECRUITER':
+        return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
+    
+    jobs = Job.objects.filter(recruiter=request.user).order_by('-posted_at')
+    logs = []
+    
+    for job in jobs:
+        applications = Application.objects.filter(job=job)
+        logs.append({
+            "job_id": job.id,
+            "title": job.title,
+            "posted_at": job.posted_at,
+            "total_applicants": applications.count(),
+            "interviews_scheduled": applications.filter(status='INTERVIEW_SCHEDULED').count(),
+            "applicants": [{
+                "name": f"{app.applicant.first_name} {app.applicant.last_name}",
+                "status": app.status,
+                "date": app.interview_date
+            } for app in applications]
+        })
+        
+    return Response(logs, status=status.HTTP_200_OK)

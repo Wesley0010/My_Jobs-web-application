@@ -245,12 +245,20 @@ export default function Dashboard() {
   return (
     <div className="dashboard-container">
       <nav className="navbar">
-        {/* THE CLICKABLE LOGO */}
         <Link to="/" style={{ textDecoration: 'none' }}>
           <h2 style={{ color: '#4CAF50', margin: 0, cursor: 'pointer' }}>My_Jobs</h2>
         </Link>
         
-        <div className="nav-links">
+        <div className="nav-links" style={{display: 'flex', alignItems: 'center', gap: '15px'}}>
+          {/* Gender-Neutral User Icon & Name */}
+          <div style={{display: 'flex', alignItems: 'center', gap: '8px', color: 'white'}}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4CAF50" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+              <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+            <span>{localStorage.getItem('firstName')} {localStorage.getItem('lastName')}</span>
+          </div>
+          
           <button onClick={() => navigate('/settings')}>Settings</button>
           <button onClick={handleLogout}>Logout</button>
         </div>

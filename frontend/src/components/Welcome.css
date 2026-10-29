@@ -1,20 +1,19 @@
 .welcome-page {
   min-height: 100vh;
-  background-color: #121212;
+  background-color: #241c1c;
   color: white;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
 /* HERO SECTION */
 .hero {
-  height: 80vh;
+  height: 80vh; /* Slightly smaller without image */
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
   padding: 0 20px;
-  background: linear-gradient(rgba(18, 18, 18, 0.9), rgba(18, 18, 18, 0.9)), 
-              url('https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=1920&q=80') center/cover;
+  background: #353131; /* Solid dark background */
 }
 
 .hero-content {
@@ -23,7 +22,7 @@
 
 .logo-text {
   font-size: 4rem;
-  color: #4CAF50;
+  color: #2446e0;
   margin-bottom: 10px;
   letter-spacing: 2px;
 }

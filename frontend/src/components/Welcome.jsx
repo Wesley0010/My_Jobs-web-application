@@ -27,19 +27,19 @@ export default function Welcome() {
         <p className="subtitle">Powered by our AI matching engine</p>
         <div className="feature-grid">
           <div className="feature-card">
-            <h3>💻 Technology & IT</h3>
+            <h3>Technology & IT</h3>
             <p>Software Engineers, Data Analysts, Network Admins, and more.</p>
           </div>
           <div className="feature-card">
-            <h3>🏥 Healthcare</h3>
+            <h3>Healthcare</h3>
             <p>Nurses, Doctors, Lab Technicians, and Hospital Administrators.</p>
           </div>
           <div className="feature-card">
-            <h3>📈 Business & Finance</h3>
+            <h3>Business & Finance</h3>
             <p>Accountants, HR Managers, Sales Executives, and Marketers.</p>
           </div>
           <div className="feature-card">
-            <h3>🏗️ Engineering</h3>
+            <h3>Engineering</h3>
             <p>Civil Engineers, Architects, and Project Managers.</p>
           </div>
         </div>
@@ -59,7 +59,7 @@ export default function Welcome() {
       </section>
 
       <footer>
-        <p>&copy; 2024 My_Jobs. All rights reserved.</p>
+        <p>&copy; 2026 My_Jobs.</p>
       </footer>
     </div>
   );

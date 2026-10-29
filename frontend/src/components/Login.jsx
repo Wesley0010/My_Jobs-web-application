@@ -27,6 +27,8 @@ export default function Login() {
         localStorage.setItem('token', data.token);
         localStorage.setItem('role', data.role);
         localStorage.setItem('userId', data.user_id);
+        localStorage.setItem('firstName', data.first_name || 'User');
+        localStorage.setItem('lastName', data.last_name || '');
         
         // Redirect to dashboard
         navigate('/dashboard');
