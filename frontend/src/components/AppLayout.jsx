@@ -82,7 +82,7 @@ function AppLayout({ children }) {
                 className={({ isActive }) => (isActive ? 'active' : '')}
                 end
               >
-                <span>🏠</span> Dashboard
+                <span></span> Dashboard
               </NavLink>
             </li>
             <li>
@@ -90,7 +90,7 @@ function AppLayout({ children }) {
                 to="/profile"
                 className={({ isActive }) => (isActive ? 'active' : '')}
               >
-                <span>👤</span> Profile
+                <span>Profile</span> 
               </NavLink>
             </li>
             <li>
@@ -98,7 +98,7 @@ function AppLayout({ children }) {
                 to="/jobs"
                 className={({ isActive }) => (isActive ? 'active' : '')}
               >
-                <span>💼</span> Jobs
+                <span>Jobs</span> 
               </NavLink>
             </li>
             <li>
@@ -106,7 +106,7 @@ function AppLayout({ children }) {
                 to="/saved"
                 className={({ isActive }) => (isActive ? 'active' : '')}
               >
-                <span>⭐</span> Saved
+                <span>Saved</span> 
               </NavLink>
             </li>
           </ul>

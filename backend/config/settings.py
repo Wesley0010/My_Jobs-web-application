@@ -114,3 +114,6 @@ REST_FRAMEWORK = {
 # Where files will be saved on your computer
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# Email backend for development (prints emails to the terminal)
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'

@@ -76,7 +76,7 @@ export default function Settings() {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Token ${token}` },
       body: JSON.stringify(formData),
     });
-    if (response.ok) setProfileMsg('✅ Profile updated successfully!');
+    if (response.ok) setProfileMsg('Profile updated successfully!');
     else setProfileMsg('Error updating profile.');
   };
 
@@ -139,14 +139,26 @@ export default function Settings() {
         ← Back to Dashboard
       </Link>
       
-      <h2 style={{color: 'white', borderBottom: '1px solid #444', paddingBottom: '10px'}}>Account Settings</h2>
+      <h2 style={{color: 'gray', borderBottom: '1px solid #573131', paddingBottom: '10px'}}>Account Settings</h2>
       
-      {/* TABS */}
-      <div style={{display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap'}}>
-        <button onClick={() => setActiveTab('profile')} className="btn-action" style={{background: activeTab === 'profile' ? '#4CAF50' : '#333'}}>Edit Profile</button>
-        <button onClick={() => setActiveTab('browse')} className="btn-action" style={{background: activeTab === 'browse' ? '#4CAF50' : '#333'}}>Browse Jobs</button>
-        <button onClick={() => setActiveTab('reports')} className="btn-action" style={{background: activeTab === 'reports' ? '#4CAF50' : '#333'}}>Reports / Complaints</button>
-        <button onClick={() => setActiveTab('logs')} className="btn-action" style={{background: activeTab === 'logs' ? '#4CAF50' : '#333'}}>My Logs</button>
+           {/* TABS */}
+      <div style={{display: 'flex', gap: '10px', marginBottom: '30px', flexWrap: 'wrap', borderBottom: '1px solid #333', paddingBottom: '15px'}}>
+        {['profile', 'browse', 'reports', 'logs'].map((tab) => (
+          <button 
+            key={tab}
+            onClick={() => setActiveTab(tab)} 
+            className="btn-action" 
+            style={{
+              background: activeTab === tab ? 'var(--primary)' : 'transparent', 
+              color: activeTab === tab ? 'white' : 'var(--text-muted)',
+              border: activeTab === tab ? '1px solid var(--primary)' : '1px solid transparent',
+              textTransform: 'capitalize',
+              padding: '8px 16px'
+            }}
+          >
+            {tab === 'reports' ? 'Reports / Complaints' : tab === 'browse' ? 'Browse Jobs' : tab === 'logs' ? 'My Logs' : 'Edit Profile'}
+          </button>
+        ))}
       </div>
 
             {/* --- TAB: PROFILE --- */}
@@ -204,14 +216,14 @@ export default function Settings() {
           <h3>Browse All Jobs (Not AI Recommended)</h3>
           {role !== 'APPLICANT' ? <p>Only applicants can browse jobs.</p> : (
             allJobs.map(job => (
-              <div key={job.id} style={{background: '#2a2a2a', padding: '15px', marginBottom: '10px', borderRadius: '5px'}}>
+              <div key={job.id} style={{background: '#3b2626', padding: '15px', marginBottom: '10px', borderRadius: '5px'}}>
                 <h4>{job.title}</h4>
-                <p style={{fontSize: '14px', color: '#ccc'}}>{job.description.substring(0, 100)}...</p>
+                <p style={{fontSize: '15px', color: '#eee5e5'}}>{job.description.substring(0, 100)}...</p>
                 <button 
                   onClick={() => handleApply(job.title, job.id)} 
                   className="btn-action"
                   disabled={appliedJobs.includes(job.title)}
-                  style={{background: appliedJobs.includes(job.title) ? '#555' : '#4CAF50'}}
+                  style={{background: appliedJobs.includes(job.title) ? '#02053daf' : '#1d0ac563'}}
                 >
                   {appliedJobs.includes(job.title) ? 'Applied' : 'Apply Now'}
                 </button>
@@ -269,11 +281,11 @@ export default function Settings() {
           {role === 'APPLICANT' && (
             myApps.length === 0 ? <p>No activity yet.</p> : (
               myApps.map(app => (
-                <div key={app.application_id} style={{background: '#2a2a2a', padding: '15px', marginBottom: '10px', borderRadius: '5px', borderLeft: app.status === 'INTERVIEW_SCHEDULED' ? '5px solid #4CAF50' : '5px solid #ff9800'}}>
+                <div key={app.application_id} style={{background: '#302e2e', padding: '15px', marginBottom: '10px', borderRadius: '5px', borderLeft: app.status === 'INTERVIEW_SCHEDULED' ? '5px solid #4CAF50' : '5px solid #ff9800'}}>
                   <h4>{app.job_title}</h4>
                   <p>Status: <strong>{app.status}</strong></p>
                   {app.interview_date && <p>Interview Date: {app.interview_date}</p>}
-                  <p style={{fontSize: '12px', color: '#aaa'}}>Applied on: {app.applied_at.substring(0, 10)}</p>
+                  <p style={{fontSize: '12px', color: '#eee5e5'}}>Applied on: {app.applied_at.substring(0, 10)}</p>
                   
                   {app.status === 'INTERVIEW_SCHEDULED' && (
                     <button onClick={() => handleDownloadLetter(app.application_id)} className="btn-action" style={{marginTop: '10px', background: '#4CAF50'}}>
@@ -298,8 +310,8 @@ export default function Settings() {
                   </p>
                   
                   {log.applicants.length > 0 && (
-                    <div style={{background: '#1e1e1e', padding: '10px', borderRadius: '5px'}}>
-                      <h5 style={{margin: '0 0 5px 0', color: '#ccc'}}>Candidate Breakdown:</h5>
+                    <div style={{background: '#1d1b1b', padding: '10px', borderRadius: '5px'}}>
+                      <h5 style={{margin: '0 0 5px 0', color: '#f1eaea'}}>Candidate Breakdown:</h5>
                       {log.applicants.map((app, i) => (
                         <div key={i} style={{fontSize: '13px', padding: '5px 0', borderBottom: '1px solid #333'}}>
                           <strong>{app.name}</strong> - Status: {app.status} {app.date && `(Scheduled: ${app.date.substring(0, 16).replace('T', ' ')})`}
