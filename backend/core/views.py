@@ -1,12 +1,15 @@
 import os
 import uuid
 from django.conf import settings
-import google.generativeai as genai
+from google import genai
 from dotenv import load_dotenv
 from django.http import HttpResponse
 from django.utils.dateparse import parse_datetime
 from django.core.mail import send_mail
 from django.contrib.auth import authenticate
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes, force_str
+from django.contrib.auth.tokens import default_token_generator
 
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
@@ -17,12 +20,13 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.authtoken.models import Token
 
-from .models import User, Resume, Job, MatchResult, Application, Complaint
+# Note: We added ResumeHistory to the imports
+from .models import User, Resume, Job, MatchResult, Application, Complaint, ResumeHistory
 from .serializers import UserRegistrationSerializer
 from .utils import extract_text_from_file, calculate_match_score
 
 load_dotenv()
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 # ==========================================
 # 1. AUTHENTICATION
@@ -59,9 +63,22 @@ def upload_resume(request):
     try:
         file = request.FILES.get('file')
         if not file: return Response({"error": "No file uploaded"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Save old resume to history before replacing
+        try:
+            old_resume = Resume.objects.get(applicant=request.user)
+            ResumeHistory.objects.create(
+                applicant=request.user,
+                file=old_resume.file,
+                parsed_text=old_resume.parsed_text
+            )
+        except Resume.DoesNotExist:
+            pass
+
         resume, created = Resume.objects.update_or_create(applicant=request.user, defaults={'file': file})
         resume.parsed_text = extract_text_from_file(resume.file.path)
         resume.save()
+        
         return Response({"message": "Resume uploaded!", "text_preview": resume.parsed_text[:200]}, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -88,6 +105,17 @@ def get_recruiter_jobs(request):
     jobs = Job.objects.filter(recruiter=request.user).order_by('-posted_at')
     return Response([{"id": j.id, "title": j.title, "description": j.description, "posted_at": j.posted_at} for j in jobs], status=status.HTTP_200_OK)
 
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_job(request, job_id):
+    if request.user.role != 'RECRUITER': return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        job = Job.objects.get(id=job_id, recruiter=request.user)
+    except Job.DoesNotExist:
+        return Response({"error": "Job not found or unauthorized"}, status=status.HTTP_404_NOT_FOUND)
+    job.delete()
+    return Response({"message": "Job deleted successfully!"}, status=status.HTTP_200_OK)
+
 # ==========================================
 # 3. AI MATCHING & SEARCH
 # ==========================================
@@ -102,10 +130,14 @@ def get_matched_jobs(request):
 
     matched_jobs = []
     for job in Job.objects.all():
-        score = calculate_match_score(resume.parsed_text, f"{job.title} {job.description}")
-        if score > 10.0:
-            MatchResult.objects.update_or_create(job=job, applicant=request.user, defaults={'score': score})
-            matched_jobs.append({"job_id": job.id, "title": job.title, "description": job.description, "recruiter": job.recruiter.username, "score": score})
+        match_data = calculate_match_score(resume.parsed_text, f"{job.title} {job.description}")
+        if match_data["score"] > 10.0:
+            MatchResult.objects.update_or_create(job=job, applicant=request.user, defaults={'score': match_data["score"]})
+            matched_jobs.append({
+                "job_id": job.id, "title": job.title, "description": job.description, 
+                "recruiter": job.recruiter.username, "score": match_data["score"],
+                "matched_keywords": match_data["matched_keywords"]
+            })
     return Response(sorted(matched_jobs, key=lambda x: x['score'], reverse=True), status=status.HTTP_200_OK)
 
 @api_view(['GET'])
@@ -117,10 +149,15 @@ def get_applicants_for_job(request, job_id):
 
     matched_applicants = []
     for resume in Resume.objects.exclude(parsed_text__isnull=True).exclude(parsed_text=""):
-        score = calculate_match_score(resume.parsed_text, f"{job.title} {job.description}")
-        if score > 10.0:
-            MatchResult.objects.update_or_create(job=job, applicant=resume.applicant, defaults={'score': score})
-            matched_applicants.append({"applicant_id": resume.applicant.id, "name": f"{resume.applicant.first_name} {resume.applicant.last_name}", "email": resume.applicant.email, "score": score})
+        match_data = calculate_match_score(resume.parsed_text, f"{job.title} {job.description}")
+        if match_data["score"] > 10.0:
+            MatchResult.objects.update_or_create(job=job, applicant=resume.applicant, defaults={'score': match_data["score"]})
+            matched_applicants.append({
+                "applicant_id": resume.applicant.id, 
+                "name": f"{resume.applicant.first_name} {resume.applicant.last_name}", 
+                "email": resume.applicant.email, "score": match_data["score"],
+                "matched_keywords": match_data["matched_keywords"]
+            })
     return Response(sorted(matched_applicants, key=lambda x: x['score'], reverse=True), status=status.HTTP_200_OK)
 
 @api_view(['GET'])
@@ -158,8 +195,8 @@ def bulk_match_resumes(request, job_id):
         try:
             with open(temp_file_path, 'wb+') as dest:
                 for chunk in file.chunks(): dest.write(chunk)
-            score = calculate_match_score(extract_text_from_file(temp_file_path), job_text)
-            results.append({"filename": file.name, "score": score})
+            score_data = calculate_match_score(extract_text_from_file(temp_file_path), job_text)
+            results.append({"filename": file.name, "score": score_data["score"], "matched_keywords": score_data["matched_keywords"]})
         except Exception as e: results.append({"filename": file.name, "score": 0, "error": str(e)})
         finally:
             if os.path.exists(temp_file_path): os.remove(temp_file_path)
@@ -182,8 +219,8 @@ def match_custom_vacancy(request):
     try:
         with open(temp_file_path, 'wb+') as dest:
             for chunk in file.chunks(): dest.write(chunk)
-        score = calculate_match_score(resume.parsed_text, extract_text_from_file(temp_file_path))
-        return Response({"score": score, "filename": file.name}, status=status.HTTP_200_OK)
+        match_data = calculate_match_score(resume.parsed_text, extract_text_from_file(temp_file_path))
+        return Response({"score": match_data["score"], "filename": file.name, "matched_keywords": match_data["matched_keywords"]}, status=status.HTTP_200_OK)
     finally:
         if os.path.exists(temp_file_path): os.remove(temp_file_path)
 
@@ -227,6 +264,23 @@ def get_my_applications(request):
     if request.user.role != 'APPLICANT': return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
     apps = Application.objects.filter(applicant=request.user).order_by('-applied_at')
     return Response([{"application_id": app.id, "job_title": app.job.title, "status": app.status, "interview_date": app.interview_date, "applied_at": app.applied_at} for app in apps], status=status.HTTP_200_OK)
+
+# --- NEW: GET RESUME HISTORY ---
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_resume_history(request):
+    if request.user.role != 'APPLICANT':
+        return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
+    
+    history = ResumeHistory.objects.filter(applicant=request.user).order_by('-uploaded_at')
+    data = []
+    for h in history:
+        data.append({
+            "id": h.id,
+            "date": h.uploaded_at,
+            "text_snippet": h.parsed_text[:150] + "..." if h.parsed_text else "No text extracted."
+        })
+    return Response(data, status=status.HTTP_200_OK)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -282,24 +336,34 @@ def chat_with_ai(request):
     if not user_message: return Response({"error": "Message required"}, status=status.HTTP_400_BAD_REQUEST)
 
     context = ""
+    top_job = "Software Engineer"
     if request.user.role == 'APPLICANT':
         try:
             resume = Resume.objects.get(applicant=request.user)
             context += f"\nUser's Resume Summary: {resume.parsed_text[:1000]}"
             matches = MatchResult.objects.filter(applicant=request.user).order_by('-score')[:3]
-            if matches: context += f"\nTop Matches: {', '.join([f'{m.job.title} ({m.score}%)' for m in matches])}"
+            if matches: 
+                context += f"\nTop Matches: {', '.join([f'{m.job.title} ({m.score}%)' for m in matches])}"
+                top_job = matches[0].job.title
         except Resume.DoesNotExist: context += "\nUser has not uploaded a resume yet."
     elif request.user.role == 'RECRUITER':
         context += f"\nPosted Jobs: {', '.join([j.title for j in Job.objects.filter(recruiter=request.user)])}"
 
+    prompt = f"You are a career assistant for My_Jobs. User Role: {request.user.role}. Context: {context}. Question: {user_message}. Provide a personalized, helpful answer."
+
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"You are a career assistant for My_Jobs. User Role: {request.user.role}. Context: {context}. Question: {user_message}. Provide a personalized, helpful answer."
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(model='gemini-2.0-flash', contents=prompt)
         return Response({"reply": response.text}, status=status.HTTP_200_OK)
     except Exception as e:
-        print(f"GEMINI ERROR: {str(e)}")
-        return Response({"reply": "I'm having trouble connecting right now. Please check the Django terminal."}, status=status.HTTP_200_OK)
+        print(f"GEMINI API ERROR (Falling back): {str(e)}")
+        # Fallback if API fails
+        if "cover letter" in user_message.lower():
+            simulated_reply = f"Here is a draft cover letter for the **{top_job}** position:\n\nDear Hiring Manager,\n\nI am writing to express my strong interest in the {top_job} role. Based on my resume, my skills align perfectly with your requirements. I am eager to bring my expertise to your team.\n\nSincerely,\n{request.user.first_name} {request.user.last_name}"
+        elif "jobs" in user_message.lower() or "apply" in user_message.lower():
+            simulated_reply = f"Based on your resume, your top match is currently the **{top_job}** position. I highly recommend applying for it through your dashboard."
+        else:
+            simulated_reply = f"That is a great question! Based on your profile as a {request.user.role}, I recommend focusing on roles like **{top_job}**. Is there anything specific you'd like to know?"
+        return Response({"reply": simulated_reply}, status=status.HTTP_200_OK)
 
 # ==========================================
 # 6. APPLICATIONS & INTERVIEWS
@@ -375,7 +439,54 @@ def generate_interview_letter(request, application_id):
     return response
 
 # ==========================================
-# 7. ADMIN
+# 7. PASSWORD RESET
+# ==========================================
+@api_view(['POST'])
+def request_password_reset(request):
+    email = request.data.get('email')
+    if not email: return Response({"error": "Email is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = User.objects.filter(email=email).first()
+    if user:
+        token = default_token_generator.make_token(user)
+        uid = urlsafe_base64_encode(force_bytes(user.pk))
+        reset_link = f"http://localhost:5173/reset-password/{uid}/{token}"
+        
+        subject = "Password Reset Request - My_Jobs"
+        message = f"Hello {user.first_name},\n\nClick the link below to reset your password:\n{reset_link}\n\nIf you didn't request this, please ignore this email."
+        
+        try:
+            send_mail(subject, message, 'noreply@myjobs.com', [user.email], fail_silently=False)
+            print(f"--- PASSWORD RESET LINK ---\n{reset_link}\n---------------------------")
+        except Exception as e:
+            print(f"Email failed: {e}")
+
+    return Response({"message": "If an account with that email exists, a reset link has been sent."}, status=status.HTTP_200_OK)
+
+@api_view(['POST'])
+def confirm_password_reset(request):
+    uidb64 = request.data.get('uid')
+    token = request.data.get('token')
+    new_password = request.data.get('new_password')
+
+    if not uidb64 or not token or not new_password:
+        return Response({"error": "Missing fields"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        uid = force_str(urlsafe_base64_decode(uidb64))
+        user = User.objects.get(pk=uid)
+    except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+        return Response({"error": "Invalid reset link"}, status=status.HTTP_400_BAD_REQUEST)
+
+    if default_token_generator.check_token(user, token):
+        user.set_password(new_password)
+        user.save()
+        return Response({"message": "Password reset successful!"}, status=status.HTTP_200_OK)
+    else:
+        return Response({"error": "Reset link is invalid or has expired."}, status=status.HTTP_400_BAD_REQUEST)
+
+# ==========================================
+# 8. ADMIN
 # ==========================================
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

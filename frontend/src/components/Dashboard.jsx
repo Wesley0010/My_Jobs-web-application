@@ -18,7 +18,7 @@ export default function Dashboard() {
   const [appliedJobs, setAppliedJobs] = useState([]);
   const [customVacancyFile, setCustomVacancyFile] = useState(null);
   const [customMatchScore, setCustomMatchScore] = useState(null);
-
+  const [customKeywords, setCustomKeywords] = useState([]);
   // --- RECRUITER STATE ---
   const [jobData, setJobData] = useState({ title: '', description: '' });
   const [jobFile, setJobFile] = useState(null);
@@ -136,7 +136,8 @@ export default function Dashboard() {
       });
       const data = await response.json();
       if (response.ok) {
-        setCustomMatchScore(data.score);
+        setCustomMatchScore(data.score); 
+        setCustomKeywords(data.matched_keywords);
       } else {
         alert(data.error);
       }
@@ -163,6 +164,32 @@ export default function Dashboard() {
         window.location.reload();
       }
     } catch (err) { alert('Server error posting job.'); }
+  };
+
+  const handleDeleteJob = async (jobId) => {
+    if (!window.confirm("Are you sure you want to delete this job? This will remove all applications and matches for this job.")) return;
+    
+    const token = localStorage.getItem('token');
+    try {
+      const response = await fetch(`http://localhost:8000/api/delete-job/${jobId}/`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Token ${token}` }
+      });
+      
+      if (response.ok) {
+        alert("Job deleted successfully!");
+        // Remove the job from the UI state without refreshing the page
+        setRecruiterJobs(recruiterJobs.filter(job => job.id !== jobId));
+        // If the deleted job was currently open in the details view, close it
+        if (selectedJobId === jobId) {
+          setSelectedJobId(null);
+        }
+      } else {
+        alert("Failed to delete job.");
+      }
+    } catch (err) {
+      alert("Server error while deleting job.");
+    }
   };
 
   const handleViewJobDetails = async (jobId) => {
@@ -314,7 +341,7 @@ export default function Dashboard() {
               </form>
             </div>
 
-            <div className="card" style={{ borderColor: '#9c27b0' }}>
+            <div className="card" style={{ borderColor: '#f1edf1' }}>
               <h3>Match a Vacancy (Not on System)</h3>
               <p style={{fontSize: '14px', color: '#aaa'}}>Upload a job description to see how well your resume matches it.</p>
               <form onSubmit={handleCustomMatch} style={{display: 'flex', gap: '10px', marginTop: '15px', alignItems: 'center'}}>
@@ -322,7 +349,15 @@ export default function Dashboard() {
                 <button type="submit" className="btn-action" style={{background: '#9c27b0'}}>Analyze Match</button>
               </form>
               {customMatchScore !== null && (
-                <h2 style={{color: '#4CAF50', marginTop: '15px'}}>Match Score: {customMatchScore}%</h2>
+                <div style={{marginTop: '15px', background: '#2a2a2a', padding: '15px', borderRadius: '5px'}}>
+                  <h2 style={{color: '#4CAF50', margin: '0 0 10px 0'}}>Match Score: {customMatchScore}%</h2>
+                  {customKeywords.length > 0 && (
+                    <div style={{display: 'flex', gap: '5px', flexWrap: 'wrap'}}>
+                      <span style={{fontSize: '14px', color: '#aaa', marginRight: '5px'}}>Matched Skills:</span>
+                      {customKeywords.map((kw, i) => <span key={i} style={{background: '#4CAF50', color: 'white', padding: '2px 8px', borderRadius: '12px', fontSize: '12px'}}>{kw}</span>)}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
@@ -334,8 +369,15 @@ export default function Dashboard() {
                 <div style={{display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '15px'}}>
                   {recommendedJobs.map((job) => (
                     <div key={job.job_id} style={{background: '#2a2a2a', padding: '15px', borderRadius: '5px', borderLeft: '5px solid #4CAF50'}}>
-                      <h4>{job.title} <span style={{color: '#4CAF50'}}>({job.score}% Match)</span></h4>
+                                            <h4>{job.title} <span style={{color: '#4CAF50'}}>({job.score}% Match)</span></h4>
                       <p style={{fontSize: '14px', color: '#ccc'}}>{job.description.substring(0, 150)}...</p>
+                      
+                      {/* NEW: SKILL TAGS */}
+                      {job.matched_keywords && job.matched_keywords.length > 0 && (
+                        <div style={{display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '10px'}}>
+                          {job.matched_keywords.map((kw, i) => <span key={i} style={{background: '#333', border: '1px solid #4CAF50', color: '#4CAF50', padding: '2px 8px', borderRadius: '12px', fontSize: '12px'}}>{kw}</span>)}
+                        </div>
+                      )}
                       <button onClick={() => handleApply(job.job_id)} className="btn-action" style={{marginTop: '10px', background: appliedJobs.includes(job.job_id) ? '#555' : '#4CAF50'}} disabled={appliedJobs.includes(job.job_id)}>
                         {appliedJobs.includes(job.job_id) ? 'Already Applied' : 'Apply Now'}
                       </button>
@@ -359,7 +401,7 @@ export default function Dashboard() {
                 <button type="submit" className="btn-action">Post Job</button>
               </form>
             </div>
-            <div className="card" style={{ borderColor: '#ff9800' }}>
+            <div className="card" style={{ borderColor: '#090909' }}>
               <h3> Search Applicants by Skill</h3>
               <p style={{fontSize: '14px', color: '#aaa'}}>Find candidates in the database who possess specific qualifications (e.g., "Python", "Nursing", "CPA").</p>
               
@@ -399,7 +441,16 @@ export default function Dashboard() {
                       <h4 style={{margin: '0 0 5px 0'}}>{job.title}</h4>
                       <p style={{fontSize: '12px', margin: 0, color: '#aaa'}}>{job.description.substring(0, 50)}...</p>
                     </div>
-                    <button onClick={() => handleViewJobDetails(job.id)} className="btn-action" style={{background: '#2196f3'}}>Manage Job</button>
+                    
+                    {/* NEW: Button Group */}
+                    <div style={{display: 'flex', gap: '10px'}}>
+                      <button onClick={() => handleViewJobDetails(job.id)} className="btn-action" style={{background: '#2196f3'}}>
+                        Manage
+                      </button>
+                      <button onClick={() => handleDeleteJob(job.id)} className="btn-action" style={{background: '#410404'}}>
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -422,6 +473,13 @@ export default function Dashboard() {
                         {bulkResults.map((res, i) => (
                           <div key={i} style={{background: '#2a2a2a', padding: '10px', marginBottom: '5px', borderRadius: '5px', borderLeft: res.score > 50 ? '5px solid #4CAF50' : '5px solid #ff9800'}}>
                             <strong>{res.filename}</strong> - Score: <span style={{color: res.score > 50 ? '#4CAF50' : '#ff9800'}}>{res.score}%</span>
+                            
+                            {/* NEW: SKILL TAGS */}
+                            {res.matched_keywords && res.matched_keywords.length > 0 && (
+                              <div style={{display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '8px'}}>
+                                {res.matched_keywords.map((kw, j) => <span key={j} style={{background: '#1e1e1e', color: '#ccc', padding: '2px 8px', borderRadius: '12px', fontSize: '11px'}}>{kw}</span>)}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -449,8 +507,15 @@ export default function Dashboard() {
                   {matchedApplicants.length === 0 ? <p>No AI matches found.</p> : (
                     matchedApplicants.map(applicant => (
                       <div key={applicant.applicant_id} style={{background: '#1e1e1e', padding: '15px', marginBottom: '10px', borderRadius: '5px', borderLeft: '5px solid #2196f3'}}>
-                         <h5 style={{margin: '0 0 5px 0'}}>{applicant.name} <span style={{color: '#2196f3'}}>({applicant.score}% Match)</span></h5>
+                                                  <h5 style={{margin: '0 0 5px 0'}}>{applicant.name} <span style={{color: '#2196f3'}}>({applicant.score}% Match)</span></h5>
                          <p style={{margin: 0, fontSize: '13px', color: '#aaa'}}>{applicant.email}</p>
+                         
+                         {/* NEW: SKILL TAGS */}
+                         {applicant.matched_keywords && applicant.matched_keywords.length > 0 && (
+                           <div style={{display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '10px'}}>
+                             {applicant.matched_keywords.map((kw, i) => <span key={i} style={{background: '#333', border: '1px solid #2196f3', color: '#2196f3', padding: '2px 8px', borderRadius: '12px', fontSize: '12px'}}>{kw}</span>)}
+                           </div>
+                         )}
                       </div>
                     ))
                   )}
@@ -499,7 +564,7 @@ export default function Dashboard() {
             </div>
 
             {/* ADMIN RESUME VIEWER */}
-            <div className="card" style={{ borderColor: '#9c27b0' }}>
+            <div className="card" style={{ borderColor: '#f1eef1' }}>
               <h3>Uploaded Resumes (Database)</h3>
               {allResumes.length === 0 ? <p>No resumes uploaded yet.</p> : (
                 <div style={{display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '15px'}}>
@@ -522,7 +587,7 @@ export default function Dashboard() {
               )}
             </div>
 
-            <div className="card" style={{ borderColor: '#9c27b0' }}>
+            <div className="card" style={{ borderColor: '#edeaee' }}>
               <h3>All System Jobs ({allJobs.length})</h3>
               <div style={{display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '15px'}}>
                 {allJobs.map((job) => (

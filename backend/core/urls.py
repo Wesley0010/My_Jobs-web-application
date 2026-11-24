@@ -44,4 +44,6 @@ urlpatterns = [
     # Admin
     path('admin-data/', views.get_admin_data, name='admin_data'),
     path('admin-update-role/<int:user_id>/', views.update_user_role, name='update_user_role'),
+    path('delete-job/<int:job_id>/', views.delete_job, name='delete_job'),
+    path('resume-history/', views.get_resume_history, name='resume_history'),
 ]

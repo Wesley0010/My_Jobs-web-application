@@ -1,9 +1,8 @@
 import PyPDF2
 import docx
+import re
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-
-
 
 def extract_text_from_file(file_path):
     """Extracts text from PDF or DOCX files."""
@@ -26,28 +25,54 @@ def extract_text_from_file(file_path):
 
 def calculate_match_score(resume_text, job_text):
     """
-    Uses TF-IDF and Cosine Similarity to calculate how well a resume matches a job.
-    Returns a percentage score (0 to 100).
+    Calculates score AND extracts the overlapping keywords/skills.
+    Returns a dictionary: {"score": float, "matched_keywords": list}
     """
     if not resume_text or not job_text:
-        return 0.0
+        return {"score": 0.0, "matched_keywords": []}
 
-    # 1. Combine the texts into a list
-    documents = [resume_text, job_text]
+    # 1. Clean the text slightly (remove punctuation to prevent mismatches)
+    def clean_text(text):
+        return re.sub(r'[^\w\s]', '', text.lower())
 
-    # 2. Convert text to TF-IDF vectors (ignore common English stop words like "the", "is")
+    clean_resume = clean_text(resume_text)
+    clean_job = clean_text(job_text)
+    documents = [clean_resume, clean_job]
+
+    # Vectorize
     vectorizer = TfidfVectorizer(stop_words='english')
     
     try:
         tfidf_matrix = vectorizer.fit_transform(documents)
     except ValueError:
-        # This happens if the text is completely empty after removing stop words
-        return 0.0
+        return {"score": 0.0, "matched_keywords": []}
 
-    # 3. Calculate cosine similarity between document 0 (resume) and document 1 (job)
-    # The result is a matrix, so we extract the [0][1] value
+    #Calculate Cosine Similarity
     similarity_score = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
-
-    # 4. Convert to percentage and round to 2 decimal places
     percentage = round(similarity_score * 100, 2)
-    return percentage
+
+    # EXTRACT MATCHING SKILLS and Get the vocabulary (all unique words)
+    feature_names = vectorizer.get_feature_names_out()
+    
+    # Get the TF-IDF scores for the resume (index 0) and job (index 1)
+    resume_vector = tfidf_matrix[0].toarray()[0]
+    job_vector = tfidf_matrix[1].toarray()[0]
+    
+    matched_keywords = []
+    for i in range(len(feature_names)):
+        # If the word has a score > 0 in BOTH the resume and the job, it's a match!
+        if resume_vector[i] > 0 and job_vector[i] > 0:
+            # We combine the scores to rank the most important matches
+            match_weight = resume_vector[i] + job_vector[i]
+            matched_keywords.append((feature_names[i], match_weight))
+            
+    # Sort matches by highest weight and take the top 10
+    matched_keywords = sorted(matched_keywords, key=lambda x: x[1], reverse=True)[:10]
+    
+    # Capitalize for nice display
+    skills_list = [word.capitalize() for word, weight in matched_keywords]
+
+    return {
+        "score": percentage,
+        "matched_keywords": skills_list
+    }

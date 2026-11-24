@@ -15,13 +15,12 @@ export default function Settings() {
   const [allJobs, setAllJobs] = useState([]);
   const [myApps, setMyApps] = useState([]);
   const [appliedJobs, setAppliedJobs] = useState([]);
+  const [resumeHistory, setResumeHistory] = useState([]); // <-- NEW
   
   // Complaints State
   const [myComplaints, setMyComplaints] = useState([]);
   const [allComplaints, setAllComplaints] = useState([]);
   const [newComplaint, setNewComplaint] = useState('');
-
-  const [recruiterLogs, setRecruiterLogs] = useState([]);
 
   const token = localStorage.getItem('token');
 
@@ -55,15 +54,28 @@ export default function Settings() {
       fetch('http://localhost:8000/api/my-applications/', { headers: { 'Authorization': `Token ${token}` } })
         .then(res => res.json()).then(data => { 
           if(Array.isArray(data)) {
-            setAppliedJobs(data.map(a => a.job_title)); // Track applied job titles
+            setAppliedJobs(data.map(a => a.job_title)); 
             setMyApps(data);
           } 
         });
     }
-    if (activeTab === 'logs' && role === 'RECRUITER') {
-      fetch('http://localhost:8000/api/recruiter-logs/', { headers: { 'Authorization': `Token ${token}` } })
-        .then(res => res.json())
-        .then(data => { if(Array.isArray(data)) setRecruiterLogs(data); });
+
+    // NEW: Fetch Logs (Applications and Resume History)
+    if (activeTab === 'logs' && role === 'APPLICANT') {
+      // Fetch Applications
+      fetch('http://localhost:8000/api/my-applications/', { headers: { 'Authorization': `Token ${token}` } })
+        .then(res => res.json()).then(data => { 
+          if(Array.isArray(data)) {
+            setAppliedJobs(data.map(a => a.job_title)); 
+            setMyApps(data);
+          } 
+        });
+
+      // Fetch Resume History
+      fetch('http://localhost:8000/api/resume-history/', { headers: { 'Authorization': `Token ${token}` } })
+        .then(res => res.json()).then(data => { 
+          if(Array.isArray(data)) setResumeHistory(data);
+        });
     }
   }, [activeTab, role, token]);
 
@@ -76,8 +88,13 @@ export default function Settings() {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Token ${token}` },
       body: JSON.stringify(formData),
     });
-    if (response.ok) setProfileMsg('Profile updated successfully!');
-    else setProfileMsg('Error updating profile.');
+    if (response.ok) {
+      localStorage.setItem('firstName', formData.first_name);
+      localStorage.setItem('lastName', formData.last_name);
+      setProfileMsg('✅ Profile updated successfully!');
+    } else {
+      setProfileMsg('❌ Error updating profile.');
+    }
   };
 
   const handleApply = async (jobTitle, jobId) => {
@@ -139,34 +156,21 @@ export default function Settings() {
         ← Back to Dashboard
       </Link>
       
-      <h2 style={{color: 'gray', borderBottom: '1px solid #573131', paddingBottom: '10px'}}>Account Settings</h2>
+      <h2 style={{color: 'white', borderBottom: '1px solid #444', paddingBottom: '10px'}}>Account Settings</h2>
       
-           {/* TABS */}
-      <div style={{display: 'flex', gap: '10px', marginBottom: '30px', flexWrap: 'wrap', borderBottom: '1px solid #333', paddingBottom: '15px'}}>
-        {['profile', 'browse', 'reports', 'logs'].map((tab) => (
-          <button 
-            key={tab}
-            onClick={() => setActiveTab(tab)} 
-            className="btn-action" 
-            style={{
-              background: activeTab === tab ? 'var(--primary)' : 'transparent', 
-              color: activeTab === tab ? 'white' : 'var(--text-muted)',
-              border: activeTab === tab ? '1px solid var(--primary)' : '1px solid transparent',
-              textTransform: 'capitalize',
-              padding: '8px 16px'
-            }}
-          >
-            {tab === 'reports' ? 'Reports / Complaints' : tab === 'browse' ? 'Browse Jobs' : tab === 'logs' ? 'My Logs' : 'Edit Profile'}
-          </button>
-        ))}
+      {/* TABS */}
+      <div style={{display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap'}}>
+        <button onClick={() => setActiveTab('profile')} className="btn-action" style={{background: activeTab === 'profile' ? '#4CAF50' : '#333'}}>Edit Profile</button>
+        <button onClick={() => setActiveTab('browse')} className="btn-action" style={{background: activeTab === 'browse' ? '#4CAF50' : '#333'}}>Browse Jobs</button>
+        <button onClick={() => setActiveTab('reports')} className="btn-action" style={{background: activeTab === 'reports' ? '#4CAF50' : '#333'}}>Reports / Complaints</button>
+        <button onClick={() => setActiveTab('logs')} className="btn-action" style={{background: activeTab === 'logs' ? '#4CAF50' : '#333'}}>My Logs</button>
       </div>
 
-            {/* --- TAB: PROFILE --- */}
+      {/* --- TAB: PROFILE --- */}
       {activeTab === 'profile' && (
         <div className="auth-container" style={{margin: 0, maxWidth: '100%', background: '#1e1e1e'}}>
           <h3>Edit Profile</h3>
           {profileMsg && <p style={{color: profileMsg.includes('❌') ? 'red' : '#4CAF50', fontWeight: 'bold'}}>{profileMsg}</p>}
-          
           <form onSubmit={handleUpdateProfile}>
             <div style={{display: 'flex', gap: '10px'}}>
               <div className="form-group" style={{flex: 1}}>
@@ -178,22 +182,18 @@ export default function Settings() {
                 <input type="text" name="middle_name" value={formData.middle_name || ''} onChange={(e) => setFormData({...formData, middle_name: e.target.value})} />
               </div>
             </div>
-
             <div className="form-group">
               <label>Last Name</label>
               <input type="text" name="last_name" value={formData.last_name || ''} onChange={(e) => setFormData({...formData, last_name: e.target.value})} required />
             </div>
-
             <div className="form-group">
               <label>Username</label>
               <input type="text" name="username" value={formData.username || ''} onChange={(e) => setFormData({...formData, username: e.target.value})} required />
             </div>
-
             <div className="form-group">
               <label>Email</label>
               <input type="email" value={formData.email || ''} onChange={(e) => setFormData({...formData, email: e.target.value})} required />
             </div>
-
             <div style={{display: 'flex', gap: '10px'}}>
               <div className="form-group" style={{flex: 1}}>
                 <label>Date of Birth</label>
@@ -204,7 +204,6 @@ export default function Settings() {
                 <input type="text" name="phone_number" value={formData.phone_number || ''} onChange={(e) => setFormData({...formData, phone_number: e.target.value})} />
               </div>
             </div>
-            
             <button type="submit" className="btn-submit">Save Changes</button>
           </form>
         </div>
@@ -216,14 +215,14 @@ export default function Settings() {
           <h3>Browse All Jobs (Not AI Recommended)</h3>
           {role !== 'APPLICANT' ? <p>Only applicants can browse jobs.</p> : (
             allJobs.map(job => (
-              <div key={job.id} style={{background: '#3b2626', padding: '15px', marginBottom: '10px', borderRadius: '5px'}}>
+              <div key={job.id} style={{background: '#2a2a2a', padding: '15px', marginBottom: '10px', borderRadius: '5px'}}>
                 <h4>{job.title}</h4>
-                <p style={{fontSize: '15px', color: '#eee5e5'}}>{job.description.substring(0, 100)}...</p>
+                <p style={{fontSize: '14px', color: '#ccc'}}>{job.description.substring(0, 100)}...</p>
                 <button 
                   onClick={() => handleApply(job.title, job.id)} 
                   className="btn-action"
                   disabled={appliedJobs.includes(job.title)}
-                  style={{background: appliedJobs.includes(job.title) ? '#02053daf' : '#1d0ac563'}}
+                  style={{background: appliedJobs.includes(job.title) ? '#555' : '#4CAF50'}}
                 >
                   {appliedJobs.includes(job.title) ? 'Applied' : 'Apply Now'}
                 </button>
@@ -272,56 +271,57 @@ export default function Settings() {
         </div>
       )}
 
-            {/* --- TAB: LOGS (Applications & Interviews) --- */}
+      {/* --- TAB: LOGS (Applications & Interviews) --- */}
       {activeTab === 'logs' && (
         <div className="card">
           <h3>Activity Logs</h3>
           
           {/* APPLICANT LOGS */}
           {role === 'APPLICANT' && (
-            myApps.length === 0 ? <p>No activity yet.</p> : (
-              myApps.map(app => (
-                <div key={app.application_id} style={{background: '#302e2e', padding: '15px', marginBottom: '10px', borderRadius: '5px', borderLeft: app.status === 'INTERVIEW_SCHEDULED' ? '5px solid #4CAF50' : '5px solid #ff9800'}}>
-                  <h4>{app.job_title}</h4>
-                  <p>Status: <strong>{app.status}</strong></p>
-                  {app.interview_date && <p>Interview Date: {app.interview_date}</p>}
-                  <p style={{fontSize: '12px', color: '#eee5e5'}}>Applied on: {app.applied_at.substring(0, 10)}</p>
-                  
-                  {app.status === 'INTERVIEW_SCHEDULED' && (
-                    <button onClick={() => handleDownloadLetter(app.application_id)} className="btn-action" style={{marginTop: '10px', background: '#4CAF50'}}>
-                      Download Interview Letter
-                    </button>
-                  )}
-                </div>
-              ))
-            )
+            <div>
+              {myApps.length === 0 ? <p>No applications yet.</p> : (
+                myApps.map(app => (
+                  <div key={app.application_id} style={{background: '#2a2a2a', padding: '15px', marginBottom: '10px', borderRadius: '5px', borderLeft: app.status === 'INTERVIEW_SCHEDULED' ? '5px solid #4CAF50' : '5px solid #ff9800'}}>
+                    <h4>{app.job_title}</h4>
+                    <p>Status: <strong>{app.status}</strong></p>
+                    {app.interview_date && <p>Interview Date: {app.interview_date}</p>}
+                    <p style={{fontSize: '12px', color: '#aaa'}}>Applied on: {app.applied_at.substring(0, 10)}</p>
+                    
+                    {app.status === 'INTERVIEW_SCHEDULED' && (
+                      <button onClick={() => handleDownloadLetter(app.application_id)} className="btn-action" style={{marginTop: '10px', background: '#4CAF50'}}>
+                        Download Interview Letter
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+
+              {/* RESUME VERSION HISTORY */}
+              <div style={{marginTop: '30px', borderTop: '1px solid #444', paddingTop: '20px'}}>
+                <h4>Resume Version History</h4>
+                <p style={{fontSize: '13px', color: '#aaa'}}>A log of your previous resume uploads.</p>
+                
+                {resumeHistory.length === 0 ? (
+                  <p style={{fontSize: '14px'}}>No past resume versions found. (Upload a new resume to create a backup of this one).</p>
+                ) : (
+                  resumeHistory.map((version) => (
+                    <div key={version.id} style={{background: '#1e1e1e', padding: '15px', marginBottom: '10px', borderRadius: '5px', borderLeft: '5px solid #9c27b0'}}>
+                      <p style={{margin: '0 0 5px 0', fontWeight: 'bold', color: '#9c27b0'}}>
+                        Uploaded on: {new Date(version.date).toLocaleString()}
+                      </p>
+                      <p style={{margin: 0, fontSize: '13px', color: '#ccc', fontStyle: 'italic'}}>
+                        "{version.text_snippet}"
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           )}
 
           {/* RECRUITER LOGS */}
           {role === 'RECRUITER' && (
-            recruiterLogs.length === 0 ? <p>No jobs posted yet.</p> : (
-              recruiterLogs.map(log => (
-                <div key={log.job_id} style={{background: '#2a2a2a', padding: '15px', marginBottom: '15px', borderRadius: '5px', borderLeft: '5px solid #2196f3'}}>
-                  <h4 style={{margin: '0 0 10px 0', color: '#2196f3'}}>{log.title}</h4>
-                  <p style={{margin: '0 0 10px 0', fontSize: '14px'}}>
-                    <strong>Posted:</strong> {log.posted_at.substring(0, 10)} | 
-                    <strong> Total Applicants:</strong> {log.total_applicants} | 
-                    <strong> Interviews Scheduled:</strong> {log.interviews_scheduled}
-                  </p>
-                  
-                  {log.applicants.length > 0 && (
-                    <div style={{background: '#1d1b1b', padding: '10px', borderRadius: '5px'}}>
-                      <h5 style={{margin: '0 0 5px 0', color: '#f1eaea'}}>Candidate Breakdown:</h5>
-                      {log.applicants.map((app, i) => (
-                        <div key={i} style={{fontSize: '13px', padding: '5px 0', borderBottom: '1px solid #333'}}>
-                          <strong>{app.name}</strong> - Status: {app.status} {app.date && `(Scheduled: ${app.date.substring(0, 16).replace('T', ' ')})`}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))
-            )
+            <p>Recruiter logs can be viewed in the Dashboard.</p>
           )}
         </div>
       )}
