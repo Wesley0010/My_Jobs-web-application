@@ -10,7 +10,7 @@ SECRET_KEY = 'django-insecure-+0r$x7$h+9q$p1b=6k&^s3#w9(1!y4m2j8c5v7z0l3x6n9a'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 # Application definition
 INSTALLED_APPS = [
@@ -100,7 +100,7 @@ AUTH_USER_MODEL = 'core.User'
 # 2. Allow React (port 5173) to talk to Django
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
-    "http://127.0.0.1:5173",
+    "http://192.168.1.151:5173",
 ]
 
 # 3. Tell DRF to use Token Authentication
@@ -114,3 +114,6 @@ REST_FRAMEWORK = {
 # Where files will be saved on your computer
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# Email backend for development (prints emails to the terminal)
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'

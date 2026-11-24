@@ -7,25 +7,34 @@ export default function Dashboard() {
   const [role, setRole] = useState('');
   const navigate = useNavigate();
 
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+
   // --- APPLICANT STATE ---
   const [file, setFile] = useState(null);
   const [uploadStatus, setUploadStatus] = useState('');
   const [recommendedJobs, setRecommendedJobs] = useState([]);
   const [appliedJobs, setAppliedJobs] = useState([]);
-
+  const [customVacancyFile, setCustomVacancyFile] = useState(null);
+  const [customMatchScore, setCustomMatchScore] = useState(null);
+  const [customKeywords, setCustomKeywords] = useState([]);
   // --- RECRUITER STATE ---
   const [jobData, setJobData] = useState({ title: '', description: '' });
   const [jobFile, setJobFile] = useState(null);
   const [recruiterJobs, setRecruiterJobs] = useState([]);
-  
-  // --- AI MATCHING & APPLICATIONS STATE ---
   const [selectedJobId, setSelectedJobId] = useState(null);
   const [matchedApplicants, setMatchedApplicants] = useState([]);
   const [jobApplications, setJobApplications] = useState([]);
+  const [bulkFiles, setBulkFiles] = useState(null);
+  const [bulkResults, setBulkResults] = useState([]);
 
   // --- ADMIN STATE ---
   const [allUsers, setAllUsers] = useState([]);
   const [allJobs, setAllJobs] = useState([]);
+  const [adminStats, setAdminStats] = useState({ total_users: 0, total_jobs: 0, total_resumes: 0 });
+  const [allResumes, setAllResumes] = useState([]);
+  const [expandedResume, setExpandedResume] = useState(null);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -59,6 +68,8 @@ export default function Dashboard() {
             if (data.users && data.jobs) {
               setAllUsers(data.users);
               setAllJobs(data.jobs);
+              setAdminStats(data.stats);
+              setAllResumes(data.resumes);
             }
         });
       }
@@ -76,7 +87,6 @@ export default function Dashboard() {
   const handleResumeUpload = async (e) => {
     e.preventDefault();
     if (!file) return setUploadStatus('Please select a file first.');
-
     const token = localStorage.getItem('token');
     const formData = new FormData();
     formData.append('file', file);
@@ -84,11 +94,8 @@ export default function Dashboard() {
     try {
       setUploadStatus('Uploading and parsing...');
       const response = await fetch('http://localhost:8000/api/upload-resume/', {
-        method: 'POST',
-        headers: { 'Authorization': `Token ${token}` },
-        body: formData,
+        method: 'POST', headers: { 'Authorization': `Token ${token}` }, body: formData,
       });
-
       const data = await response.json();
       if (response.ok) {
         setUploadStatus('Success! Resume parsed.');
@@ -105,19 +112,36 @@ export default function Dashboard() {
     const token = localStorage.getItem('token');
     try {
       const response = await fetch(`http://localhost:8000/api/apply/${jobId}/`, {
-        method: 'POST',
-        headers: { 'Authorization': `Token ${token}` }
+        method: 'POST', headers: { 'Authorization': `Token ${token}` }
       });
-      const data = await response.json();
       if (response.ok) {
         alert("Application submitted successfully!");
         setAppliedJobs([...appliedJobs, jobId]);
       } else {
+        alert("Failed to apply or already applied.");
+      }
+    } catch (err) { alert("Server error"); }
+  };
+
+  const handleCustomMatch = async (e) => {
+    e.preventDefault();
+    if (!customVacancyFile) return alert("Please select a vacancy file.");
+    const token = localStorage.getItem('token');
+    const formData = new FormData();
+    formData.append('file', customVacancyFile);
+
+    try {
+      const response = await fetch('http://localhost:8000/api/match-custom-vacancy/', {
+        method: 'POST', headers: { 'Authorization': `Token ${token}` }, body: formData,
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setCustomMatchScore(data.score); 
+        setCustomKeywords(data.matched_keywords);
+      } else {
         alert(data.error);
       }
-    } catch (err) {
-      alert("Server error");
-    }
+    } catch (err) { alert("Server error"); }
   };
 
   // ==========================================
@@ -133,54 +157,112 @@ export default function Dashboard() {
 
     try {
       const response = await fetch('http://localhost:8000/api/create-job/', {
-        method: 'POST',
-        headers: { 'Authorization': `Token ${token}` },
-        body: formData,
+        method: 'POST', headers: { 'Authorization': `Token ${token}` }, body: formData,
       });
       if (response.ok) {
         alert('Job posted successfully!');
         window.location.reload();
       }
+    } catch (err) { alert('Server error posting job.'); }
+  };
+
+  const handleDeleteJob = async (jobId) => {
+    if (!window.confirm("Are you sure you want to delete this job? This will remove all applications and matches for this job.")) return;
+    
+    const token = localStorage.getItem('token');
+    try {
+      const response = await fetch(`http://localhost:8000/api/delete-job/${jobId}/`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Token ${token}` }
+      });
+      
+      if (response.ok) {
+        alert("Job deleted successfully!");
+        // Remove the job from the UI state without refreshing the page
+        setRecruiterJobs(recruiterJobs.filter(job => job.id !== jobId));
+        // If the deleted job was currently open in the details view, close it
+        if (selectedJobId === jobId) {
+          setSelectedJobId(null);
+        }
+      } else {
+        alert("Failed to delete job.");
+      }
     } catch (err) {
-      alert('Server error posting job.');
+      alert("Server error while deleting job.");
     }
   };
 
   const handleViewJobDetails = async (jobId) => {
     const token = localStorage.getItem('token');
-    
     fetch(`http://localhost:8000/api/job/${jobId}/applicants/`, {
       headers: { 'Authorization': `Token ${token}` }
-    }).then(res => res.json()).then(data => {
-        if (Array.isArray(data)) setMatchedApplicants(data);
-    });
+    }).then(res => res.json()).then(data => { if (Array.isArray(data)) setMatchedApplicants(data); });
 
     fetch(`http://localhost:8000/api/job/${jobId}/applications/`, {
       headers: { 'Authorization': `Token ${token}` }
-    }).then(res => res.json()).then(data => {
-        if (Array.isArray(data)) setJobApplications(data);
-    });
+    }).then(res => res.json()).then(data => { if (Array.isArray(data)) setJobApplications(data); });
 
     setSelectedJobId(jobId);
+    setBulkResults([]); // Clear previous bulk results
+  };
+
+  const handleBulkUpload = async (e) => {
+    e.preventDefault();
+    if (!bulkFiles || bulkFiles.length === 0) return alert("Select files first.");
+    
+    const token = localStorage.getItem('token');
+    const formData = new FormData();
+    // Loop through all selected files and append them
+    for (let i = 0; i < bulkFiles.length; i++) {
+      formData.append('files', bulkFiles[i]);
+    }
+
+    try {
+      const response = await fetch(`http://localhost:8000/api/bulk-match/${selectedJobId}/`, {
+        method: 'POST', headers: { 'Authorization': `Token ${token}` }, body: formData,
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setBulkResults(data);
+      } else {
+        alert(data.error);
+      }
+    } catch (err) { alert("Server error during bulk upload."); }
+  };
+
+  const handleSearchApplicants = async (e) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+    setIsSearching(true);
+    const token = localStorage.getItem('token');
+    
+    try {
+      const response = await fetch(`http://localhost:8000/api/search-applicants/?q=${searchQuery}`, {
+        headers: { 'Authorization': `Token ${token}` }
+      });
+      const data = await response.json();
+      if (Array.isArray(data)) {
+        setSearchResults(data);
+      }
+    } catch (err) {
+      alert("Error searching applicants");
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   const handleScheduleInterview = async (applicationId) => {
     const dateInput = prompt("Enter interview date and time (Format: YYYY-MM-DD HH:MM):");
     if (!dateInput) return;
-
     const formattedDate = dateInput.replace(" ", "T") + ":00";
     const token = localStorage.getItem('token');
 
     try {
       const response = await fetch(`http://localhost:8000/api/schedule-interview/${applicationId}/`, {
         method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Token ${token}` 
-        },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Token ${token}` },
         body: JSON.stringify({ interview_date: formattedDate })
       });
-      
       if (response.ok) {
         alert("Interview Scheduled! (Check Django terminal for email)");
         handleViewJobDetails(selectedJobId);
@@ -188,9 +270,7 @@ export default function Dashboard() {
         const data = await response.json();
         alert(data.error || "Failed to schedule");
       }
-    } catch (err) {
-      alert("Server error");
-    }
+    } catch (err) { alert("Server error"); }
   };
 
   const handleDownloadReport = async (jobId) => {
@@ -199,19 +279,13 @@ export default function Dashboard() {
       const response = await fetch(`http://localhost:8000/api/report/${jobId}/`, {
         headers: { 'Authorization': `Token ${token}` }
       });
-      
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `Report_Job_${jobId}.pdf`;
-      document.body.appendChild(a);
       a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      alert("Error downloading report");
-    }
+    } catch (err) { alert("Error downloading report"); }
   };
 
   // ==========================================
@@ -222,24 +296,14 @@ export default function Dashboard() {
     try {
       const response = await fetch(`http://localhost:8000/api/admin-update-role/${userId}/`, {
         method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Token ${token}` 
-        },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Token ${token}` },
         body: JSON.stringify({ role: newRole })
       });
-      
       if (response.ok) {
         alert("User role updated successfully!");
-        setAllUsers(allUsers.map(user => 
-          user.id === userId ? { ...user, role: newRole } : user
-        ));
-      } else {
-        alert("Failed to update role.");
+        setAllUsers(allUsers.map(user => user.id === userId ? { ...user, role: newRole } : user));
       }
-    } catch (err) {
-      alert("Server error");
-    }
+    } catch (err) { alert("Server error"); }
   };
 
   return (
@@ -248,9 +312,7 @@ export default function Dashboard() {
         <Link to="/" style={{ textDecoration: 'none' }}>
           <h2 style={{ color: '#4CAF50', margin: 0, cursor: 'pointer' }}>My_Jobs</h2>
         </Link>
-        
         <div className="nav-links" style={{display: 'flex', alignItems: 'center', gap: '15px'}}>
-          {/* Gender-Neutral User Icon & Name */}
           <div style={{display: 'flex', alignItems: 'center', gap: '8px', color: 'white'}}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4CAF50" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
@@ -258,7 +320,6 @@ export default function Dashboard() {
             </svg>
             <span>{localStorage.getItem('firstName')} {localStorage.getItem('lastName')}</span>
           </div>
-          
           <button onClick={() => navigate('/settings')}>Settings</button>
           <button onClick={handleLogout}>Logout</button>
         </div>
@@ -272,7 +333,7 @@ export default function Dashboard() {
         {role === 'APPLICANT' && (
           <div>
             <div className="card" style={{ borderColor: '#ff9800' }}>
-              <h3>📄 Upload Your Resume</h3>
+              <h3> Upload Your Resume</h3>
               {uploadStatus && <p style={{color: 'yellow', fontWeight: 'bold'}}>{uploadStatus}</p>}
               <form onSubmit={handleResumeUpload} style={{display: 'flex', gap: '10px', marginTop: '15px'}}>
                 <input type="file" accept=".pdf,.docx" onChange={(e) => setFile(e.target.files[0])} style={{color: 'white'}} required />
@@ -280,22 +341,44 @@ export default function Dashboard() {
               </form>
             </div>
 
+            <div className="card" style={{ borderColor: '#f1edf1' }}>
+              <h3>Match a Vacancy (Not on System)</h3>
+              <p style={{fontSize: '14px', color: '#aaa'}}>Upload a job description to see how well your resume matches it.</p>
+              <form onSubmit={handleCustomMatch} style={{display: 'flex', gap: '10px', marginTop: '15px', alignItems: 'center'}}>
+                <input type="file" accept=".pdf,.docx" onChange={(e) => setCustomVacancyFile(e.target.files[0])} style={{color: 'white'}} required />
+                <button type="submit" className="btn-action" style={{background: '#9c27b0'}}>Analyze Match</button>
+              </form>
+              {customMatchScore !== null && (
+                <div style={{marginTop: '15px', background: '#2a2a2a', padding: '15px', borderRadius: '5px'}}>
+                  <h2 style={{color: '#4CAF50', margin: '0 0 10px 0'}}>Match Score: {customMatchScore}%</h2>
+                  {customKeywords.length > 0 && (
+                    <div style={{display: 'flex', gap: '5px', flexWrap: 'wrap'}}>
+                      <span style={{fontSize: '14px', color: '#aaa', marginRight: '5px'}}>Matched Skills:</span>
+                      {customKeywords.map((kw, i) => <span key={i} style={{background: '#4CAF50', color: 'white', padding: '2px 8px', borderRadius: '12px', fontSize: '12px'}}>{kw}</span>)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="card">
-              <h3>💼 Recommended Jobs (AI Matched)</h3>
+              <h3>Recommended Jobs (AI Matched)</h3>
               {recommendedJobs.length === 0 ? (
                 <p>No matches yet. Upload your resume or wait for recruiters to post jobs.</p>
               ) : (
                 <div style={{display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '15px'}}>
                   {recommendedJobs.map((job) => (
                     <div key={job.job_id} style={{background: '#2a2a2a', padding: '15px', borderRadius: '5px', borderLeft: '5px solid #4CAF50'}}>
-                      <h4>{job.title} <span style={{color: '#4CAF50'}}>({job.score}% Match)</span></h4>
+                                            <h4>{job.title} <span style={{color: '#4CAF50'}}>({job.score}% Match)</span></h4>
                       <p style={{fontSize: '14px', color: '#ccc'}}>{job.description.substring(0, 150)}...</p>
-                      <button 
-                        onClick={() => handleApply(job.job_id)} 
-                        className="btn-action" 
-                        style={{marginTop: '10px', background: appliedJobs.includes(job.job_id) ? '#555' : '#4CAF50'}}
-                        disabled={appliedJobs.includes(job.job_id)}
-                      >
+                      
+                      {/* NEW: SKILL TAGS */}
+                      {job.matched_keywords && job.matched_keywords.length > 0 && (
+                        <div style={{display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '10px'}}>
+                          {job.matched_keywords.map((kw, i) => <span key={i} style={{background: '#333', border: '1px solid #4CAF50', color: '#4CAF50', padding: '2px 8px', borderRadius: '12px', fontSize: '12px'}}>{kw}</span>)}
+                        </div>
+                      )}
+                      <button onClick={() => handleApply(job.job_id)} className="btn-action" style={{marginTop: '10px', background: appliedJobs.includes(job.job_id) ? '#555' : '#4CAF50'}} disabled={appliedJobs.includes(job.job_id)}>
                         {appliedJobs.includes(job.job_id) ? 'Already Applied' : 'Apply Now'}
                       </button>
                     </div>
@@ -310,7 +393,7 @@ export default function Dashboard() {
         {role === 'RECRUITER' && (
           <div>
             <div className="card" style={{ borderColor: '#2196f3' }}>
-              <h3>➕ Post a New Job</h3>
+              <h3>Post a New Job</h3>
               <form onSubmit={handleCreateJob}>
                 <input type="text" placeholder="Job Title" value={jobData.title} onChange={(e) => setJobData({...jobData, title: e.target.value})} style={{width: '100%', padding: '10px', marginBottom: '10px', background: '#2a2a2a', color: 'white', border: '1px solid #444', borderRadius: '5px'}} required />
                 <textarea placeholder="Job Description" value={jobData.description} onChange={(e) => setJobData({...jobData, description: e.target.value})} style={{width: '100%', padding: '10px', marginBottom: '10px', background: '#2a2a2a', color: 'white', border: '1px solid #444', borderRadius: '5px'}} rows="3" required />
@@ -318,9 +401,39 @@ export default function Dashboard() {
                 <button type="submit" className="btn-action">Post Job</button>
               </form>
             </div>
+            <div className="card" style={{ borderColor: '#090909' }}>
+              <h3> Search Applicants by Skill</h3>
+              <p style={{fontSize: '14px', color: '#aaa'}}>Find candidates in the database who possess specific qualifications (e.g., "Python", "Nursing", "CPA").</p>
+              
+              <form onSubmit={handleSearchApplicants} style={{display: 'flex', gap: '10px', marginTop: '15px'}}>
+                <input 
+                  type="text" 
+                  placeholder="Enter a skill or keyword..." 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{flex: 1, padding: '10px', background: '#2a2a2a', color: 'white', border: '1px solid #444', borderRadius: '5px'}}
+                />
+                <button type="submit" className="btn-action" style={{background: '#ff9800'}}>
+                  {isSearching ? 'Searching...' : 'Search'}
+                </button>
+              </form>
+
+              {searchResults.length > 0 && (
+                <div style={{marginTop: '20px'}}>
+                  <h4>Found {searchResults.length} Candidates:</h4>
+                  {searchResults.map((candidate) => (
+                    <div key={candidate.applicant_id} style={{background: '#2a2a2a', padding: '15px', marginBottom: '10px', borderRadius: '5px', borderLeft: '5px solid #ff9800'}}>
+                      <h5 style={{margin: '0 0 5px 0'}}>{candidate.name}</h5>
+                      <p style={{margin: '0 0 5px 0', fontSize: '13px', color: '#aaa'}}>{candidate.email}</p>
+                      <p style={{margin: 0, fontSize: '12px', fontStyle: 'italic', color: '#ccc'}}>{candidate.snippet}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <div className="card">
-              <h3>📋 Your Posted Jobs</h3>
+              <h3>Your Posted Jobs</h3>
               <div style={{display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '15px'}}>
                 {recruiterJobs.map((job) => (
                   <div key={job.id} style={{background: '#2a2a2a', padding: '15px', borderRadius: '5px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
@@ -328,18 +441,54 @@ export default function Dashboard() {
                       <h4 style={{margin: '0 0 5px 0'}}>{job.title}</h4>
                       <p style={{fontSize: '12px', margin: 0, color: '#aaa'}}>{job.description.substring(0, 50)}...</p>
                     </div>
-                    <button onClick={() => handleViewJobDetails(job.id)} className="btn-action" style={{background: '#2196f3'}}>Manage Job</button>
+                    
+                    {/* NEW: Button Group */}
+                    <div style={{display: 'flex', gap: '10px'}}>
+                      <button onClick={() => handleViewJobDetails(job.id)} className="btn-action" style={{background: '#2196f3'}}>
+                        Manage
+                      </button>
+                      <button onClick={() => handleDeleteJob(job.id)} className="btn-action" style={{background: '#410404'}}>
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
 
               {selectedJobId && (
                 <div style={{marginTop: '30px', borderTop: '1px solid #444', paddingTop: '20px'}}>
+                  
+                  {/* BULK UPLOAD SECTION */}
+                  <div style={{marginBottom: '20px', padding: '15px', background: '#1a1a1a', borderRadius: '5px', border: '1px dashed #2196f3'}}>
+                    <h4 style={{marginTop: 0, color: '#2196f3'}}> Bulk Match Resumes</h4>
+                    <p style={{fontSize: '13px', color: '#aaa'}}>Upload multiple resumes to see who matches best for this job.</p>
+                    <form onSubmit={handleBulkUpload} style={{display: 'flex', gap: '10px', alignItems: 'center', marginTop: '10px'}}>
+                      <input type="file" multiple accept=".pdf,.docx" onChange={(e) => setBulkFiles(e.target.files)} style={{color: 'white'}} required />
+                      <button type="submit" className="btn-action" style={{background: '#2196f3'}}>Analyze Files</button>
+                    </form>
+                    
+                    {bulkResults.length > 0 && (
+                      <div style={{marginTop: '15px'}}>
+                        <h5>Bulk Results:</h5>
+                        {bulkResults.map((res, i) => (
+                          <div key={i} style={{background: '#2a2a2a', padding: '10px', marginBottom: '5px', borderRadius: '5px', borderLeft: res.score > 50 ? '5px solid #4CAF50' : '5px solid #ff9800'}}>
+                            <strong>{res.filename}</strong> - Score: <span style={{color: res.score > 50 ? '#4CAF50' : '#ff9800'}}>{res.score}%</span>
+                            
+                            {/* NEW: SKILL TAGS */}
+                            {res.matched_keywords && res.matched_keywords.length > 0 && (
+                              <div style={{display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '8px'}}>
+                                {res.matched_keywords.map((kw, j) => <span key={j} style={{background: '#1e1e1e', color: '#ccc', padding: '2px 8px', borderRadius: '12px', fontSize: '11px'}}>{kw}</span>)}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                    <h4>📩 Real Applications</h4>
-                    <button onClick={() => handleDownloadReport(selectedJobId)} className="btn-action" style={{background: '#4CAF50', padding: '8px 15px'}}>
-                      Download PDF Report
-                    </button>
+                    <h4>Real Applications</h4>
+                    <button onClick={() => handleDownloadReport(selectedJobId)} className="btn-action" style={{background: '#4CAF50', padding: '8px 15px'}}>Download PDF Report</button>
                   </div>
                   
                   {jobApplications.length === 0 ? <p>No applications yet.</p> : (
@@ -348,20 +497,25 @@ export default function Dashboard() {
                         <h5 style={{margin: '0 0 5px 0'}}>{app.applicant_name} <span style={{color: '#aaa', fontWeight: 'normal'}}>({app.email})</span></h5>
                         <p style={{margin: '0 0 10px 0', fontSize: '14px'}}>Status: <strong>{app.status}</strong> {app.interview_date && `| Date: ${app.interview_date}`}</p>
                         {app.status === 'APPLIED' && (
-                          <button onClick={() => handleScheduleInterview(app.application_id)} className="btn-action" style={{padding: '5px 10px', fontSize: '12px'}}>
-                            Schedule Interview
-                          </button>
+                          <button onClick={() => handleScheduleInterview(app.application_id)} className="btn-action" style={{padding: '5px 10px', fontSize: '12px'}}>Schedule Interview</button>
                         )}
                       </div>
                     ))
                   )}
 
-                  <h4 style={{marginTop: '20px'}}>🤖 AI Suggested Candidates</h4>
+                  <h4 style={{marginTop: '20px'}}> AI Suggested Candidates</h4>
                   {matchedApplicants.length === 0 ? <p>No AI matches found.</p> : (
                     matchedApplicants.map(applicant => (
                       <div key={applicant.applicant_id} style={{background: '#1e1e1e', padding: '15px', marginBottom: '10px', borderRadius: '5px', borderLeft: '5px solid #2196f3'}}>
-                         <h5 style={{margin: '0 0 5px 0'}}>{applicant.name} <span style={{color: '#2196f3'}}>({applicant.score}% Match)</span></h5>
+                                                  <h5 style={{margin: '0 0 5px 0'}}>{applicant.name} <span style={{color: '#2196f3'}}>({applicant.score}% Match)</span></h5>
                          <p style={{margin: 0, fontSize: '13px', color: '#aaa'}}>{applicant.email}</p>
+                         
+                         {/* NEW: SKILL TAGS */}
+                         {applicant.matched_keywords && applicant.matched_keywords.length > 0 && (
+                           <div style={{display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '10px'}}>
+                             {applicant.matched_keywords.map((kw, i) => <span key={i} style={{background: '#333', border: '1px solid #2196f3', color: '#2196f3', padding: '2px 8px', borderRadius: '12px', fontSize: '12px'}}>{kw}</span>)}
+                           </div>
+                         )}
                       </div>
                     ))
                   )}
@@ -374,8 +528,24 @@ export default function Dashboard() {
         {/* --- ADMIN VIEW --- */}
         {role === 'ADMIN' && (
           <div>
+            {/* ADMIN STATS */}
+            <div style={{display: 'flex', gap: '15px', marginBottom: '20px', flexWrap: 'wrap'}}>
+              <div className="card" style={{flex: 1, textAlign: 'center', borderColor: '#4CAF50'}}>
+                <h2 style={{margin: 0, color: '#4CAF50', fontSize: '2.5rem'}}>{adminStats.total_users}</h2>
+                <p style={{margin: 0, color: '#aaa'}}>Total Users</p>
+              </div>
+              <div className="card" style={{flex: 1, textAlign: 'center', borderColor: '#2196f3'}}>
+                <h2 style={{margin: 0, color: '#2196f3', fontSize: '2.5rem'}}>{adminStats.total_jobs}</h2>
+                <p style={{margin: 0, color: '#aaa'}}>Jobs Posted</p>
+              </div>
+              <div className="card" style={{flex: 1, textAlign: 'center', borderColor: '#ff9800'}}>
+                <h2 style={{margin: 0, color: '#ff9800', fontSize: '2.5rem'}}>{adminStats.total_resumes}</h2>
+                <p style={{margin: 0, color: '#aaa'}}>Resumes Uploaded</p>
+              </div>
+            </div>
+
             <div className="card" style={{ borderColor: '#9c27b0' }}>
-              <h3>👥 Manage Users ({allUsers.length})</h3>
+              <h3> Manage Users</h3>
               <div style={{display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '15px'}}>
                 {allUsers.map((user) => (
                   <div key={user.id} style={{background: '#2a2a2a', padding: '15px', borderRadius: '5px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
@@ -393,8 +563,32 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="card" style={{ borderColor: '#9c27b0' }}>
-              <h3>📋 All System Jobs ({allJobs.length})</h3>
+            {/* ADMIN RESUME VIEWER */}
+            <div className="card" style={{ borderColor: '#f1eef1' }}>
+              <h3>Uploaded Resumes (Database)</h3>
+              {allResumes.length === 0 ? <p>No resumes uploaded yet.</p> : (
+                <div style={{display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '15px'}}>
+                  {allResumes.map(res => (
+                    <div key={res.id} style={{background: '#2a2a2a', padding: '15px', borderRadius: '5px'}}>
+                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                        <h4 style={{margin: 0}}>{res.applicant__username}'s Resume</h4>
+                        <button onClick={() => setExpandedResume(expandedResume === res.id ? null : res.id)} className="btn-action" style={{padding: '5px 10px', fontSize: '12px'}}>
+                          {expandedResume === res.id ? 'Hide Text' : 'View Extracted Text'}
+                        </button>
+                      </div>
+                      {expandedResume === res.id && (
+                        <div style={{marginTop: '10px', background: '#1e1e1e', padding: '10px', borderRadius: '5px', maxHeight: '200px', overflowY: 'auto'}}>
+                          <pre style={{whiteSpace: 'pre-wrap', fontSize: '12px', color: '#ccc'}}>{res.parsed_text || "No text extracted."}</pre>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="card" style={{ borderColor: '#edeaee' }}>
+              <h3>All System Jobs ({allJobs.length})</h3>
               <div style={{display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '15px'}}>
                 {allJobs.map((job) => (
                   <div key={job.id} style={{background: '#2a2a2a', padding: '15px', borderRadius: '5px'}}>
